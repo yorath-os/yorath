@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CopyBlock } from './ApiKeys'
-import { CA_FILE, curlExample, useOwnCa } from './endpoint'
+import { caCommands, curlExample, useCaFingerprint, useOwnCa } from './endpoint'
 import {
   checkAgentTelegram,
   connectAgent,
@@ -11,6 +11,7 @@ import {
   fetchEgress,
   fetchNodes,
   setAgentChannel,
+  restartAgent,
   setAgentNetwork,
   setAgentVersion,
   type ClusterNode,
@@ -43,6 +44,7 @@ const TELEGRAM_SHORT: Record<NonNullable<ConnectedAgent['telegram_check']>['stat
 const STATUS: Record<NonNullable<ConnectedAgent['status']>, { label: string; tone: Tone }> = {
   lost: { label: 'Node unavailable', tone: 'error' },
   starting: { label: 'Starting', tone: 'warn' },
+  restarting: { label: 'Restarting', tone: 'warn' }, // until the node reports it running again
   running: { label: 'Running', tone: 'ok' },
   stopped: { label: 'Stopped', tone: 'neutral' },
   failed: { label: 'Error', tone: 'error' },
@@ -71,7 +73,8 @@ function ConnectRow({
   const [version, setVersion] = useState('')
   const [node, setNode] = useState('')
   const [token, setToken] = useState('')
-  const [allowed, setAllowed] = useState('')
+  // enabling an agent connected before: its bot users come back filled in (field-fixes-0-7)
+  const [allowed, setAllowed] = useState(agent.telegram_users.join(', '))
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const submit = async () => {
@@ -129,7 +132,12 @@ function ConnectRow({
           )}
         </Field>
       )}
-      <Field label="Telegram bot token" hint={`Optional. ${TOKEN_NOTE}`}>
+      <Field
+        label="Telegram bot token"
+        hint={
+          agent.telegram ? 'The saved bot stays: put a token only to replace it.' : `Optional. ${TOKEN_NOTE}`
+        }
+      >
         {({ id, describedBy }) => (
           <input
             id={id}
@@ -142,7 +150,7 @@ function ConnectRow({
           />
         )}
       </Field>
-      {token && (
+      {(token || agent.telegram) && (
         <Field
           label="Who to answer in Telegram"
           hint="Comma-separated user ids; empty means the agent’s rules"
@@ -247,6 +255,7 @@ function telegramState(info: ConnectedAgent, now: number = Date.now()): { text: 
 // model agent/<name> and a key narrowed to the agent, Telegram. The key is shown once.
 export function HowToUse({ info, onCheck }: { info: ConnectedAgent; onCheck?: () => void }) {
   const ca = useOwnCa()
+  const fingerprint = useCaFingerprint(ca)
   const [key, setKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const issue = async () => {
@@ -278,9 +287,19 @@ export function HowToUse({ info, onCheck }: { info: ConnectedAgent; onCheck?: ()
             </Notice>
           )}
           {error && <Notice tone="error">{error}</Notice>}
+          {ca && (
+            <CopyBlock
+              label="Get the certificate on your computer"
+              where={
+                `${PRODUCT} uses its own certificate: put it next to the call first.` +
+                (fingerprint ? ` Its SHA-256 fingerprint: ${fingerprint}` : '')
+              }
+              text={caCommands()}
+            />
+          )}
           <CopyBlock
             label={`Call ${info.name} over the API`}
-            where={ca ? `Download ${CA_FILE} in API keys and run this in its folder:` : undefined}
+            where={ca ? 'Then, in the same folder:' : undefined}
             text={curlExample(key ?? '$YORATH_API_KEY', ca, info.name)}
           />
         </li>
@@ -322,7 +341,10 @@ export function ConnectedSection({ name, onChanged }: { name: string; onChanged:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name])
   // the bot check comes with the node's next pass: ask again until it is there
-  const checking = Boolean(info?.connected && info.telegram && !info.telegram_check)
+  // …and while the agent restarts, until the node reports it running (field-fixes-0-7)
+  const checking = Boolean(
+    info?.connected && ((info.telegram && !info.telegram_check) || info.status === 'restarting'),
+  )
   useEffect(() => {
     if (!checking) return
     const t = setInterval(() => void load(), 5000)
@@ -382,6 +404,7 @@ export function ConnectedSection({ name, onChanged }: { name: string; onChanged:
       {info.connected && (
         <>
           <div className="a3-agent-actions">
+            <Button onClick={() => void act(restartAgent(name))}>Restart</Button>
             <Button onClick={() => void act(setAgentNetwork(name, !info.network_enabled))}>
               {info.network_enabled ? 'Turn off internet' : 'Turn on internet'}
             </Button>

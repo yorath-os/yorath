@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from yorath.control.cluster.placements import ensure_servers
+from yorath.control.cluster.placements import ensure_servers, failover_default
 from yorath.control.journal import AuditEventType, Journal
 from yorath.control.model import (
     AgentRevision,
@@ -417,6 +417,7 @@ async def heartbeat_loop(
         try:
             async with sessions() as s:
                 await sweep_lost(s, journal)
+                await failover_default(s, journal)  # change field-fixes-0-7
         except Exception:  # noqa: BLE001
             log.exception("node heartbeat check failed")
         await asyncio.sleep(interval_s)

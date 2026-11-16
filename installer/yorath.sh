@@ -1,6 +1,6 @@
 #!/bin/sh
 # yorath — maintain a Yorath installation on a node (change update-and-rollback, criterion §12 item 9).
-#
+# help:begin — `yorath help` prints these lines; every command of the dispatcher below must be here
 #   yorath status                         version, services, backups and how to open it in a browser
 #   yorath open                           how to open Yorath in a browser from your computer
 #   yorath backup                         backup: database, documents, custom agents, TLS, .env.local
@@ -15,9 +15,11 @@
 #   yorath model pull <name> --node <node> [--gpu N] [--replace]   place a model on a cluster node
 #   yorath model remove <name> [--node <node>] [--gpu N]           take it off the node's model servers
 #   yorath model default <name>                                    point local/default at a catalog model
-#   yorath agent list|add|remove|upgrade|telegram|internet|logs  connected agents (OpenClaw, Hermes)
+#   yorath agent list|add|remove|upgrade|restart|model|telegram|internet|logs  connected agents (OpenClaw, Hermes)
 #   yorath node token|list|approve|revoke|sync    cluster: nodes by token, WireGuard tunnel
 #   yorath node set-classes <node> <classes…>     data classes that may be sent to a node
+#   yorath help                           this list
+# help:end
 #
 # Every data replacement is preceded by a safety backup and followed by an installation.restored audit event.
 # Variables: YORATH_DIR (installation directory), YORATH_BACKUP_DIR (/var/lib/yorath/backups),
@@ -216,6 +218,12 @@ rotate() {  # regular backups: the last $KEEP stay; safety and rollback backups 
   done
 }
 
+# a volume as tar.gz on stdout; tar's exit 1 ("socket ignored", "file changed as we read it" in the
+# memory of a running agent) is a warning, not a failed backup (field-fixes-0-7)
+save_volume() {
+  docker run --rm -v "$1:/v:ro" "$(pg_image)" sh -c 'tar -C /v -czf - .; rc=$?; [ "$rc" -le 1 ]'
+}
+
 do_backup() {  # kind (regular|pre-update|safety) → backup path on stdout
   kind="$1"
   wait_db || die "database is not responding: cannot take a backup (yorath doctor)"
@@ -235,13 +243,11 @@ do_backup() {  # kind (regular|pre-update|safety) → backup path on stdout
   for v in $VOLUMES; do
     docker volume inspect "${PROJECT}_$v" >/dev/null 2>&1 || continue
     say "backup $name: volume $v"
-    docker run --rm -v "${PROJECT}_$v:/v:ro" "$(pg_image)" tar -C /v -czf - . > "$dir/$v.tar.gz" \
-      || { rm -rf "$dir"; die "could not save volume $v"; }
+    save_volume "${PROJECT}_$v" > "$dir/$v.tar.gz" || { rm -rf "$dir"; die "could not save volume $v"; }
   done
   for v in $(agent_volumes); do  # connected agent memory: file volume-<volume name>.tar.gz
     say "backup $name: agent ${v#yorath-agent-}"
-    docker run --rm -v "$v:/v:ro" "$(pg_image)" tar -C /v -czf - . > "$dir/volume-$v.tar.gz" \
-      || { rm -rf "$dir"; die "could not save volume $v"; }
+    save_volume "$v" > "$dir/volume-$v.tar.gz" || { rm -rf "$dir"; die "could not save volume $v"; }
   done
   cp "$env_local" "$dir/env.local"
   [ -d installer/tls ] && tar -C installer -czf "$dir/tls.tar.gz" tls
@@ -790,6 +796,10 @@ cmd_agent() {  # connected agents (change connected-agents): same as the My Agen
   esac
 }
 
+cmd_help() {  # the lines between the help markers at the top of this file
+  sed -n '/^# help:begin/,/^# help:end/p' "$YORATH_SELF_COPY" | sed '1d;$d' | sed 's/^# \{0,1\}//'
+}
+
 # --- cluster (change cluster-nodes, decision 35) ----------------------------------------------
 WG_DIR=/var/lib/yorath/wg
 WG_CONF=/etc/wireguard/yorath-wg.conf
@@ -918,6 +928,6 @@ case "$cmd" in
   model) cmd_model "$@" ;;
   agent) cmd_agent "$@" ;;
   node) cmd_node "$@" ;;
-  -h|--help|help) sed -n '2,18p' "$YORATH_SELF_COPY" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help) cmd_help ;;
   *) die "unknown command $cmd (yorath help)" ;;
 esac

@@ -1,3 +1,4 @@
+import { DefaultWarningNotice } from './DefaultWarning'
 import { type DeskSummary } from './api'
 import { clockTime, duration, plural, triggerLabel } from './format'
 import { StatusScreen, type StatusData, type WidgetPlacement } from './screens/a3/StatusScreen'
@@ -90,20 +91,26 @@ export default function Desk({
   state,
   onOpenTasks,
   onOpenTask,
+  onChanged,
 }: {
   summary: DeskSummary | null
   state: ScreenState
   onOpenTasks: () => void
   onOpenTask: (id: string) => void
+  onChanged?: () => void
 }) {
+  const warning = summary?.default_warning
   return (
-    <StatusScreen
-      state={state}
-      mode="view"
-      layout={LAYOUT}
-      data={summary ? toStatusData(summary) : undefined}
-      onOpenTasks={onOpenTasks}
-      onOpenTask={onOpenTask}
-    />
+    <>
+      {warning && <DefaultWarningNotice warning={warning} onChanged={() => onChanged?.()} />}
+      <StatusScreen
+        state={state}
+        mode="view"
+        layout={LAYOUT}
+        data={summary ? toStatusData(summary) : undefined}
+        onOpenTasks={onOpenTasks}
+        onOpenTask={onOpenTask}
+      />
+    </>
   )
 }

@@ -85,6 +85,9 @@ async def test_question_becomes_execution_with_trace_and_outcome(
         and root.attributes["yorath.loop.no_tools"] is False
     )
     assert root.attributes["yorath.tools.unavailable"] == []
+    # the passages fit the window: nothing shortened or removed for the model
+    assert root.attributes["yorath.loop.tool_results_shortened"] == 0
+    assert root.attributes["yorath.loop.tool_results_removed"] == 0
     assert (
         first_llm.attributes["yorath.tools"] == ["search_docs", "query_records", "ask_agent"]
         and first_llm.model == "fake-chat"

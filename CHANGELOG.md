@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.8.0](https://github.com/yorath-os/yorath/compare/v0.7.0...v0.8.0) (2026-11-16)
+
+
+### Features
+
+* **cluster:** move the default model off a lost node
+* **core:** choose the model of any agent in its settings
+* **core:** choose the models an API key can call
+* **core:** restart a connected agent without losing its key or memory
+* **web:** choose an agent's model on its card
+* **web:** pick the models of an API key
+* **web:** restart a connected agent from its card
+* **web:** show the agent's model in the chat instead of a picker
+* **web:** warn on the Desk when the default model moved by itself
+
+
+### Bug fixes
+
+* **cluster:** close the failover warning when the default is set from the server
+* **core:** check the window of the agent's own model when enabling it
+* **core:** pin the schema version to the key models migration
+* **core:** say why web search fails instead of a bare HTTP 403
+* **core:** shorten tool results to fit the model instead of dropping them
+* **core:** take an external model's context window from its catalog
+* **infra:** open site screenshots large on click
+* **installer:** back up a running agent's memory despite its sockets
+* **installer:** keep words of docker output out of container addresses
+* **installer:** list every command in yorath help, node included
+* **web:** enable an agent connected before without asking again
+* **web:** give the command that puts the certificate next to an API call
+* **web:** open an agent by a click anywhere on its row
+* **web:** scroll only the conversation as an answer comes in
+
+## [0.7.1](https://github.com/yorath-os/yorath/compare/v0.7.0...v0.7.1) (2026-11-16)
+
+
+### Bug fixes
+
+* **infra:** let a failed subscription email be retried at once
+* **infra:** say "confirmed" when a subscription link is opened again
+* **web:** give ready commands to connect an OpenClaw found outside Yorath
+* **web:** list an outside agent connected by key apart from those to connect
+
 ## 0.7.0 (2026-11-16)
 
 

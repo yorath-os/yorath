@@ -58,7 +58,7 @@ describe('Chat', () => {
     const stream = sseStream()
     const api = world(stream)
     render(<Chat />)
-    await screen.findByRole('combobox', { name: 'Model' })
+    await screen.findByRole('textbox', { name: 'Model' })
     await ask('how many days?')
 
     await waitFor(() => expect(api.bodyOf('POST /api/chat/conversations/c1/messages')).toBeDefined())
@@ -77,11 +77,35 @@ describe('Chat', () => {
     api.assertAllAnswered()
   })
 
+  it('a new answer scrolls the conversation, not the page; reading an older answer is not interrupted', async () => {
+    const page = vi.spyOn(Element.prototype, 'scrollIntoView')
+    const stream = sseStream()
+    world(stream)
+    render(<Chat />)
+    await screen.findByRole('textbox', { name: 'Model' })
+    const log = document.querySelector('.a3-chat__scroll') as HTMLElement
+    Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 1000 })
+    Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 300 })
+    await ask('how many days?')
+    stream.send('token', { text: 'First part.' })
+    await screen.findByText('First part.')
+    expect(log.scrollTop).toBe(1000)
+    expect(page).not.toHaveBeenCalled()
+
+    log.scrollTop = 100 // the user scrolled up to read
+    log.dispatchEvent(new Event('scroll'))
+    stream.send('token', { text: ' Second part.' })
+    await screen.findByText('First part. Second part.')
+    expect(log.scrollTop).toBe(100)
+    stream.close()
+    page.mockRestore()
+  })
+
   it('shows a policy denial with the reason', async () => {
     const stream = sseStream()
     const api = world(stream)
     render(<Chat />)
-    await screen.findByRole('combobox', { name: 'Model' })
+    await screen.findByRole('textbox', { name: 'Model' })
     await ask('search the web')
 
     await waitFor(() => expect(api.bodyOf('POST /api/chat/conversations/c1/messages')).toBeDefined())
@@ -94,16 +118,27 @@ describe('Chat', () => {
     stream.close()
   })
 
-  it('passes the chosen model and warns that data leaves the server', async () => {
+  it('shows the agent’s model, links to its settings and warns when data leaves the server', async () => {
     const stream = sseStream()
-    const api = world(stream)
+    const api = stubApi({
+      'GET /api/chat/agents': AGENTS,
+      'GET /api/chat/conversations': [CONV],
+      'GET /api/chat/conversations/c1/messages': [],
+      // the owner chose the external model for this agent in its settings
+      'GET /api/chat/models?agent=document-assistant': [
+        { ...LOCAL, default: false },
+        { ...EXTERNAL, default: true },
+      ],
+      'POST /api/chat/conversations/c1/messages': () => stream.response(),
+    })
     render(<Chat />)
-    const select = await screen.findByRole('combobox', { name: 'Model' })
-    expect(screen.queryByRole('note')).not.toBeInTheDocument()
-
-    await userEvent.selectOptions(select, 'openrouter/default')
+    expect(await screen.findByRole('textbox', { name: 'Model' })).toHaveValue('External: openai/x')
+    expect(screen.queryByRole('combobox', { name: 'Model' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Change the model in the agent’s settings' })).toHaveAttribute(
+      'href',
+      '#agents-list/document-assistant',
+    )
     expect(screen.getByRole('note')).toHaveTextContent('The request text and fragments leave the server')
-    expect(localStorage.getItem('yorath.chat.model')).toBe('openrouter/default')
 
     await ask('question')
     await waitFor(() =>
@@ -119,7 +154,7 @@ describe('Chat', () => {
     const stream = sseStream()
     world(stream)
     render(<Chat />)
-    await screen.findByRole('combobox', { name: 'Model' })
+    await screen.findByRole('textbox', { name: 'Model' })
     await ask('question')
     const status = await screen.findByRole('status')
     expect(status).toHaveTextContent('Local model is preparing an answer.')
@@ -132,7 +167,7 @@ describe('Chat', () => {
     const stream = sseStream()
     world(stream)
     render(<Chat />)
-    await screen.findByRole('combobox', { name: 'Model' })
+    await screen.findByRole('textbox', { name: 'Model' })
     await ask('question')
     stream.send('queued', { ahead: 2 })
     expect(
@@ -259,7 +294,7 @@ describe('Chat', () => {
     const stream = sseStream()
     const api = world(stream)
     render(<Chat />)
-    await screen.findByRole('combobox', { name: 'Model' })
+    await screen.findByRole('textbox', { name: 'Model' })
     await ask('question')
     await waitFor(() => expect(api.bodyOf('POST /api/chat/conversations/c1/messages')).toBeDefined())
     stream.send('error', { code: 'agent_disabled', message: 'agent disabled by the owner' })

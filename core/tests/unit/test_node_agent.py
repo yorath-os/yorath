@@ -268,3 +268,30 @@ def test_egress_lines_are_sent_in_batches_the_main_node_accepts(tmp_path):
     assert second == [f"line {i}" for i in range(5, 10)], "the next batch starts after the first"
     offset.write_text(position)
     assert new_egress_lines(settings, max_lines=5)[0] == ["line 10", "line 11"]
+
+
+def test_restart_recreates_the_container_with_its_volume_without_pulling(node):
+    """Field-fixes-0-7: Restart is a new restart nonce; the same image, config and volume."""
+    docker, settings = node
+    reconcile({"agents": [running()]}, docker, MANIFEST, settings)
+    old = docker.containers["yorath-agent-openclaw"].id
+    docker.actions.clear()
+    [report] = reconcile(
+        {"agents": [running() | {"restart_nonce": "r1"}]}, docker, MANIFEST, settings
+    )
+    assert report["state"] == "starting"
+    assert docker.containers["yorath-agent-openclaw"].id != old
+    assert not any(a.startswith("pull") for a in docker.actions)
+    assert "yorath-agent-openclaw" in docker.volumes
+    docker.actions.clear()
+    reconcile({"agents": [running() | {"restart_nonce": "r1"}]}, docker, MANIFEST, settings)
+    assert docker.actions == []  # the same nonce: nothing to do
+
+
+def test_an_update_adding_the_restart_label_recreates_nothing(node):
+    docker, settings = node
+    reconcile({"agents": [running()]}, docker, MANIFEST, settings)
+    docker.containers["yorath-agent-openclaw"].labels.pop("yorath.restart")  # made by 0.7.x
+    docker.actions.clear()
+    reconcile({"agents": [running()]}, docker, MANIFEST, settings)
+    assert docker.actions == []

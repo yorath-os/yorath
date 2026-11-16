@@ -137,3 +137,49 @@ describe('API keys', () => {
     await vi.waitFor(() => expect(api.calls.some((c) => c.key === 'DELETE /api/api-keys/k1')).toBe(true))
   })
 })
+
+describe('Models of a key', () => {
+  const CATALOG = [
+    { name: 'local/default', context_length: 4096, external: false },
+    { name: 'openrouter/default', context_length: 131072, external: true },
+  ]
+
+  it('a new key gets every model by default; ticking narrows it', async () => {
+    const api = stubApi({
+      'GET /api/api-keys': [],
+      'GET /api/api-keys/models': CATALOG,
+      'POST /api/api-keys': { status: 201, body: { ...KEY, key: SECRET } },
+    })
+    render(<ApiKeys owner={false} />)
+    await userEvent.type(await screen.findByLabelText('Key name'), 'laptop')
+    expect(screen.getByRole('radio', { name: 'All models' })).toBeChecked()
+    await userEvent.click(screen.getByRole('radio', { name: 'Only these models' }))
+    await userEvent.click(screen.getByRole('checkbox', { name: /local\/default/ }))
+    expect(screen.getByRole('checkbox', { name: /openrouter\/default.*leaves the server/ })).not.toBeChecked()
+    await userEvent.click(screen.getByRole('button', { name: 'Create key' }))
+    expect(await screen.findByDisplayValue(SECRET)).toBeInTheDocument()
+    expect(api.bodyOf('POST /api/api-keys')).toEqual({ name: 'laptop', models: ['local/default'] })
+  })
+
+  it('the list shows each key’s models; they change without a new key', async () => {
+    let listed: { models: string[] | null }[] = [{ ...KEY, models: null }]
+    const api = stubApi({
+      'GET /api/api-keys': () => ({ status: 200, body: listed }),
+      'GET /api/api-keys/models': CATALOG,
+      'PATCH /api/api-keys/k1': (body: unknown) => {
+        listed = [{ ...KEY, models: (body as { models: string[] }).models }]
+        return { status: 200, body: listed[0] }
+      },
+    })
+    render(<ApiKeys owner={false} />)
+    const table = await screen.findByRole('table', { name: 'API keys' })
+    expect(await within(table).findByText('all models')).toBeInTheDocument()
+    await userEvent.click(within(table).getByRole('button', { name: 'Models: laptop' }))
+    const editor = screen.getByRole('group', { name: 'Models of laptop' })
+    await userEvent.click(within(editor).getByRole('radio', { name: 'Only these models' }))
+    await userEvent.click(within(editor).getByRole('checkbox', { name: /openrouter\/default/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save models' }))
+    expect(api.bodyOf('PATCH /api/api-keys/k1')).toEqual({ models: ['openrouter/default'] })
+    expect(await within(table).findByText('openrouter/default')).toBeInTheDocument()
+  })
+})

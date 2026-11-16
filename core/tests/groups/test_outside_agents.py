@@ -126,6 +126,31 @@ async def test_the_main_node_comes_from_its_own_file(world):
     assert [(a["agent"], a["where"]) for a in main["agents"]] == [("hermes", "container")]
 
 
+async def test_an_agent_connected_by_its_key_is_listed_apart_until_the_key_is_revoked(world):
+    await world.node.post("/node/report", json={"instances": [], "host": OPENCLAW_ON_NODE})
+    other = await world.owner.post("/api-keys", json={"name": "laptop"})
+    assert other.status_code == 201, other.text
+    assert (await outside(world))["vm13234"][
+        "keys"
+    ] == {}  # anchor: an unrelated key connects nobody
+    r = await world.owner.post("/api-keys", json={"name": "openclaw-vm13234"})
+    assert r.status_code == 201, r.text
+    created = r.json()
+    assert (await outside(world))["vm13234"]["keys"] == {
+        "openclaw": {"name": "openclaw-vm13234", "last_used_at": None}
+    }
+    agent = AsyncClient(
+        transport=ASGITransport(app=world.app), base_url="http://test",
+        headers={"Authorization": f"Bearer {created['key']}"},
+    )  # fmt: skip
+    assert (await agent.get("/v1/models")).status_code == 200
+    await agent.aclose()
+    used = (await outside(world))["vm13234"]["keys"]["openclaw"]["last_used_at"]
+    assert used is not None and used.startswith("20")
+    assert (await world.owner.delete(f"/api-keys/{created['id']}")).status_code == 204
+    assert (await outside(world))["vm13234"]["keys"] == {}
+
+
 async def test_the_report_is_for_the_owner_only(world):
     member = AsyncClient(transport=ASGITransport(app=world.app), base_url="http://test")
     assert (await member.get("/cluster/outside-agents")).status_code == 401

@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
 from yorath.control.desk import views
 from yorath.control.identity.deps import Db, Owner
@@ -12,8 +12,8 @@ router = APIRouter(tags=["desk"])
 
 
 @router.get("/desk/summary", response_model=views.DeskSummary)
-async def desk_summary(_: Owner, db: Db):
-    return await views.desk_summary(db)
+async def desk_summary(_: Owner, db: Db, request: Request):
+    return await views.desk_summary(db, request.app.state.manifest)
 
 
 @router.get("/tasks", response_model=views.TaskList)

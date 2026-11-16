@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from tests.fixtures.corpus import AGENTS_DIR, OWNER
 from yorath.control.agents.loader import sync_agents_dir
@@ -19,11 +19,18 @@ from yorath.control.cluster import placements
 from yorath.control.cluster import service as cluster
 from yorath.control.journal import AuditEvent, AuditEventType, SpanKind
 from yorath.control.journal.models import TraceSpan
-from yorath.control.model import ModelPlacement, ModelResource, ModelServer, Node
+from yorath.control.model import (
+    DataClass,
+    ModelPlacement,
+    ModelProvider,
+    ModelResource,
+    ModelServer,
+    Node,
+)
 from yorath.control.setup import model_cli
 from yorath.control.setup.hardware import HardwareInfo
 from yorath.control.setup.inventory import upsert_node
-from yorath.control.setup.ollama import OllamaClient
+from yorath.control.setup.ollama import OllamaClient, register_model
 
 pytestmark = pytest.mark.group
 
@@ -670,3 +677,90 @@ async def test_migration_turns_default_model_on_a_node_into_catalog_and_placemen
         async with admin.connect() as conn:
             await conn.execute(text(f'drop database if exists "{name}"'))
         await admin.dispose()
+
+
+# --- failover of the default (change field-fixes-0-7) -----------------------------------------
+
+
+async def lose(session, name: str, minutes: float) -> None:
+    """The node has been silent for ``minutes`` and the sweep has marked it lost."""
+    from datetime import UTC, datetime, timedelta
+
+    await session.execute(
+        update(Node).where(Node.name == name).values(
+            status="lost", last_seen_at=datetime.now(UTC) - timedelta(minutes=minutes)
+        )
+    )  # fmt: skip
+    await session.commit()
+
+
+async def default_of(w) -> str:
+    return next(n for n, m in (await catalog(w)).items() if m["default"])
+
+
+async def test_lost_default_node_switches_to_the_main_cpu_model_and_back_by_button(
+    world, session, backends
+):
+    """The user switched off the A10 node with the default model: the agents stopped and the
+    default stayed there. Now it moves to the model that is up, and the owner is told."""
+    assert (await place(world, "gemma4:e2b"))[0] == 200  # main, CPU
+    await join(world, "node-2", KEY_2, gpu=1)
+    assert (await place(world, "qwen3.5:9b", node="node-2"))[0] == 200
+    await world.owner.post("/cluster/models/default", json={"model": "qwen3.5:9b"})
+    journal = world.app.state.journal
+
+    await lose(session, "node-2", 1)  # lost a minute ago: it may come back
+    assert await placements.failover_default(session, journal) is None
+    assert await default_of(world) == "local/qwen3.5:9b"
+
+    await lose(session, "node-2", 3)
+    assert await placements.failover_default(session, journal) == "local/gemma4:e2b"
+    assert await default_of(world) == "local/gemma4:e2b"
+    assert (await ask(world)).status_code == 200 and backends.chat[-1]["model"] == "gemma4:e2b"
+    [switched] = await audit(session, AuditEventType.MODEL_DEFAULT_SWITCHED)
+    assert switched.actor_principal_id is None
+    assert switched.details == {"from": "local/qwen3.5:9b", "to": "local/gemma4:e2b",
+                                "node": "node-2", "reason": "node_lost"}  # fmt: skip
+    warning = (await world.owner.get("/desk/summary")).json()["default_warning"]
+    assert (
+        warning["switched_from"] == "local/qwen3.5:9b"
+        and warning["switched_to"] == "local/gemma4:e2b"
+    )
+    assert warning["short_window"] == ["hermes", "openclaw"] and warning["can_return"] is False
+
+    # the node is back: said, with a button to return; the pointer stays where it is
+    await session.execute(update(Node).where(Node.name == "node-2").values(status="active",
+                                                                           last_seen_at=func.now()))  # fmt: skip
+    await session.commit()
+    await placements.failover_default(session, journal)
+    assert await default_of(world) == "local/gemma4:e2b"
+    warning = (await world.owner.get("/desk/summary")).json()["default_warning"]
+    assert warning["node_back"] is True and warning["can_return"] is True
+    # returned from the server (yorath model default), not the panel: the warning closes too
+    await placements.set_default(session, journal, "qwen3.5:9b", actor_id=None, source="cli")
+    assert (await world.owner.get("/desk/summary")).json()["default_warning"] is None
+
+
+async def test_failover_prefers_a_gpu_model_and_never_an_external_one(world, session, backends):
+    assert (await place(world, "gemma4:e2b"))[0] == 200  # main, CPU
+    await join(world, "node-2", KEY_2, gpu=1)
+    await join(world, "node-3", KEY_3, gpu=1)
+    assert (await place(world, "qwen3.5:9b", node="node-2"))[0] == 200
+    assert (await place(world, "qwen3.5:4b", node="node-3"))[0] == 200
+    await register_model(session, "openrouter/default", ModelProvider.OPENROUTER, "openai/x",
+                         [DataClass.PUBLIC], context_length=131072)  # fmt: skip
+    await world.owner.post("/cluster/models/default", json={"model": "qwen3.5:9b"})
+    await lose(session, "node-2", 3)
+    assert await placements.failover_default(session, world.app.state.journal) == "local/qwen3.5:4b"
+
+
+async def test_no_model_up_leaves_the_pointer_and_says_so(world, session, backends):
+    await join(world, "node-2", KEY_2, gpu=1)
+    assert (await place(world, "qwen3.5:9b", node="node-2"))[0] == 200
+    await lose(session, "node-2", 3)
+    assert await placements.failover_default(session, world.app.state.journal) is None
+    assert await default_of(world) == "local/qwen3.5:9b"
+    warning = (await world.owner.get("/desk/summary")).json()["default_warning"]
+    assert warning["switched_to"] is None and warning["switched_from"] == "local/qwen3.5:9b"
+    assert (await world.owner.post("/cluster/models/default/dismiss")).status_code == 204
+    assert (await world.owner.get("/desk/summary")).json()["default_warning"] is None

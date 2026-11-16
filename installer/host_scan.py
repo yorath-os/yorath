@@ -10,6 +10,7 @@ in home directories, and other containers. The report has no secrets: names, use
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import pwd
@@ -274,9 +275,18 @@ def container_ips() -> dict[str, list[str]]:
                 "{{.Name}} {{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", *ids])  # fmt: skip
     found: dict[str, list[str]] = {}
     for line in (out or "").splitlines():
-        name, *ips = line.split()
-        found[name.lstrip("/")] = [ip for ip in ips if ip]
+        name, *words = line.split()
+        # a host-network container has no address of its own: Docker prints "invalid IP" for it
+        found[name.lstrip("/")] = [w for w in words if _is_ip(w)]
     return found
+
+
+def _is_ip(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return True
 
 
 def host_ips() -> list[str]:

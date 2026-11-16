@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from yorath import PRODUCT_NAME
 from yorath.control.cluster.placements import card_allows
-from yorath.control.identity.api_keys import AgentNotCallable, api_agent, resolve_key
+from yorath.control.identity.api_keys import AgentNotCallable, api_agent, key_models, resolve_key
 from yorath.control.identity.deps import Db
 from yorath.control.journal import ControlLevel
 from yorath.control.model import (
@@ -97,7 +97,12 @@ async def _agent(request: Request, db: Db, key: ApiKey | None = None):
             return await load_agent(
                 db, name or "", request.app.state.settings.agents_dir, allow_disabled=True
             )
-        return await load_agent(db, AGENT, request.app.state.settings.agents_dir)
+        agent, revision, card, body = await load_agent(
+            db, AGENT, request.app.state.settings.agents_dir
+        )
+        if key is not None:  # the key's models replace the endpoint card's (field-fixes-0-7)
+            card = card.model_copy(update={"models": await key_models(db, key, card.models)})
+        return agent, revision, card, body
     except GatewayError as exc:
         raise EndpointError(
             403 if exc.code == "agent_disabled" else 503, exc.code, str(exc)

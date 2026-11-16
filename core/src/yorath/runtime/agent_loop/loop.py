@@ -70,6 +70,8 @@ class Final(BaseModel):
     all_citations: list[Citation] = []
     no_tools: bool = False
     steps: int = 0
+    tool_results_shortened: int = 0  # by the context budget on the last model call
+    tool_results_removed: int = 0
 
 
 class Failure(BaseModel):
@@ -131,6 +133,40 @@ class CitationBook:
         return [c for c in self.citations if c.n in used]
 
 
+@dataclass
+class Trim:
+    """How many tool results the budget shortened and removed (span attributes, Journal)."""
+
+    shortened: int = 0
+    removed: int = 0
+
+
+MIN_SHARE = 600  # below this a shortened tool result is useless: the oldest is removed instead
+BLOCK = re.compile(r"\n\n(?=\[\d+\] )")
+
+
+def _shorten(content: str, limit: int) -> str:
+    """Cut a tool result to ``limit`` characters; numbered passages [n] each keep their number,
+    title and URL (everything before ": ") and lose the end of their text."""
+    if len(content) <= limit:
+        return content
+    head, *blocks = BLOCK.split(content)
+    if not blocks:
+        return content[: max(limit - 1, 0)] + "…"
+    if head.lstrip().startswith("["):  # no preamble: the first passage is in head
+        head, blocks = "", [head, *blocks]
+    room = max(limit - len(head) - 2 * len(blocks), 0) // len(blocks)
+    cut = []
+    for b in blocks:
+        if len(b) <= room:
+            cut.append(b)
+            continue
+        label, sep, _ = b.partition(": ")
+        keep = label + sep if sep and len(label) < room else ""
+        cut.append(keep + b[len(keep) : max(room - 1, len(keep))] + "…")
+    return "\n\n".join(([head] if head else []) + cut)
+
+
 def build_messages(
     system: str,
     history: list[Message],
@@ -140,19 +176,35 @@ def build_messages(
     num_ctx: int = 4096,
     history_limit: int = 6,
     preamble: str = PREAMBLE,
+    trim: Trim | None = None,
 ) -> list[ChatMessage]:
-    """The system prompt and the task are never trimmed; tool results go first
-    (oldest first), then the conversation history."""
+    """The system prompt and the task are never trimmed; tool results are shortened first (each
+    passage keeps its [n], title and URL), removed whole only if even that doesn't fit (oldest
+    first), then the conversation history goes."""
     budget = int(num_ctx * CONTEXT_SHARE * CHARS_PER_TOKEN)
     system_text = f"{system}\n\n{preamble}" if preamble else system
     fixed = len(system_text) + len(task)
     kept = [m.model_copy() for m in steps]
     size = lambda ms: sum(len(m.content or "") + 40 * len(m.tool_calls) for m in ms)  # noqa: E731
-    for step_msg in kept:
-        if fixed + size(kept) <= budget:
+    tools = [m for m in kept if m.role == "tool"]
+    while fixed + size(kept) > budget:
+        alive = [m for m in tools if m.content != TRIMMED]
+        if not alive:
             break
-        if step_msg.role == "tool" and step_msg.content != TRIMMED:
-            step_msg.content = TRIMMED
+        others = size([m for m in kept if m.role != "tool"]) + len(TRIMMED) * (
+            len(tools) - len(alive)
+        )
+        share = (budget - fixed - others) // len(alive)
+        if share >= MIN_SHARE:
+            for m in alive:
+                if len(m.content or "") > share:
+                    m.content = _shorten(m.content or "", share)
+            break
+        alive[0].content = TRIMMED
+    if trim is not None:
+        pairs = [(k, s) for k, s in zip(kept, steps, strict=True) if k.role == "tool"]
+        trim.removed = sum(1 for k, _ in pairs if k.content == TRIMMED)
+        trim.shortened = sum(1 for k, s in pairs if k.content not in (TRIMMED, s.content))
     used = fixed + size(kept)
     tail: list[Message] = []
     for past in reversed(history[-history_limit:]):
@@ -194,8 +246,9 @@ async def run(
     try:
         async with asyncio.timeout(settings.timeout_seconds):
             for step in range(1, settings.max_steps + 1):
+                trim = Trim()
                 messages = build_messages(
-                    ctx.body, history or [], task, steps, num_ctx=deps.num_ctx
+                    ctx.body, history or [], task, steps, num_ctx=deps.num_ctx, trim=trim
                 )
                 # The last step answers from the facts so far: otherwise the model searches until
                 # it hits the limit and fails.
@@ -285,6 +338,8 @@ async def run(
                     all_citations=book.citations,
                     no_tools=not used_tools,
                     steps=step,
+                    tool_results_shortened=trim.shortened,
+                    tool_results_removed=trim.removed,
                 )
                 return
             yield Failure(

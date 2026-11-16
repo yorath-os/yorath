@@ -113,7 +113,14 @@ export function AgentsScreen({
             {agents.map((a) => {
               const st = AGENT_STATUS[a.status]
               return (
-                <li key={a.id} className="a3-apps__row">
+                // the whole row opens the agent; the name button is its keyboard entry, the action button keeps its own
+                <li
+                  key={a.id}
+                  className="a3-apps__row a3-apps__row--open"
+                  onClick={(e) => {
+                    if (!(e.target as HTMLElement).closest('button')) onOpen(a.id)
+                  }}
+                >
                   <span className={`a3-avatar a3-avatar--${a.avatarTone ?? 1}`} aria-hidden="true">
                     {a.letter ?? a.name.charAt(0).toUpperCase()}
                   </span>

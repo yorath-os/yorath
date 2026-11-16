@@ -8,9 +8,12 @@ import {
   fetchAgents,
   fetchAgentSource,
   fetchConnected,
+  fetchKeyModels,
   fetchNodes,
   setAgentEnabled,
+  setAgentModel,
   type AgentInfo,
+  type KeyModel,
   type AgentSource,
   type AgentTool,
   type ExecutionInfo,
@@ -59,6 +62,67 @@ function AgentText({ source }: { source: AgentSource | null }) {
 }
 
 const CONNECTED_RUNTIMES = new Set(['openclaw', 'hermes'])
+
+// The model the agent uses (change field-fixes-0-7): any chat model of the catalog, OpenRouter included;
+// a connected agent can't take a model whose window is below its minimum
+function AgentModel({ agent, onChanged }: { agent: AgentInfo; onChanged: () => void }) {
+  const [catalog, setCatalog] = useState<KeyModel[]>([])
+  const [minContext, setMinContext] = useState(0)
+  const [value, setValue] = useState(agent.model ?? '')
+  const [note, setNote] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+  const connected = CONNECTED_RUNTIMES.has(agent.runtime)
+  useEffect(() => {
+    const load = async () => {
+      const m = await fetchKeyModels()
+      setCatalog(m.status === 200 ? m.body : [])
+      if (connected) {
+        const c = await fetchConnected()
+        const spec = c.status === 200 ? c.body.find((a) => a.name === agent.name) : undefined
+        setMinContext(spec?.min_context ?? 0)
+      }
+    }
+    void load()
+  }, [agent.name, connected])
+  const fileModel = agent.revision?.card.model ?? 'local/default'
+  const save = async () => {
+    const r = await setAgentModel(agent.name, value || null)
+    if (r.status === 200) {
+      setNote({ tone: 'ok', text: `New requests go to ${value || fileModel}.` })
+      onChanged()
+    } else setNote({ tone: 'error', text: connectedError(r.status, r.body) })
+  }
+  return (
+    <section aria-label="Model">
+      <h3 className="a3-section-label">Model</h3>
+      <div className="a3-agent-actions">
+        <select
+          className="a3-input"
+          aria-label="Model"
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value)
+            setNote(null)
+          }}
+        >
+          <option value="">{fileModel} (the agent’s file)</option>
+          {catalog
+            .filter((m) => m.name !== fileModel)
+            .map((m) => (
+              <option key={m.name} value={m.name} disabled={m.context_length < minContext}>
+                {m.name}, {m.context_length.toLocaleString('en-US')} tokens
+                {m.external ? ', external: requests leave the server' : ''}
+                {m.context_length < minContext ? ` — needs ${minContext.toLocaleString('en-US')} tokens` : ''}
+              </option>
+            ))}
+        </select>
+        <Button onClick={() => void save()} disabled={value === (agent.model ?? '')}>
+          Save model
+        </Button>
+      </div>
+      {note && <Notice tone={note.tone === 'ok' ? 'info' : 'error'}>{note.text}</Notice>}
+    </section>
+  )
+}
 
 function AgentCard({
   agent,
@@ -109,7 +173,7 @@ function AgentCard({
               {
                 key: 'Models',
                 value: card?.models.join(', ') || '—',
-                hint: `default ${card?.model ?? '—'}`,
+                hint: `uses ${agent.model ?? card?.model ?? '—'}`,
               },
               { key: 'Tools', value: card?.tools.map(fmtTool).join(', ') || '—' },
               { key: 'Sources', value: card?.data.join(', ') || '—' },
@@ -124,6 +188,7 @@ function AgentCard({
               { key: 'Cost', value: fmtCost(agent.cost_usd) },
             ]}
           />
+          <AgentModel agent={agent} onChanged={onChanged} />
           {connected ? (
             <ConnectedSection name={agent.name} onChanged={onChanged} />
           ) : (
@@ -269,7 +334,10 @@ export default function Agents({
       if (n.status === 200 && n.body.some((x) => x.role === 'worker' && x.status === 'active')) {
         // only agents from the connected catalog run on a node; model-api and other external ones don't
         const c = await fetchConnected()
-        if (c.status === 200 && c.body.some((a) => a.name === name && !a.connected)) {
+        const row = c.status === 200 ? c.body.find((a) => a.name === name && !a.connected) : undefined
+        // connected before and its node still here: enabled as it was, no form (field-fixes-0-7)
+        const nodeGone = !!row?.node && !n.body.some((x) => x.name === row.node && x.status === 'active')
+        if (row && (!row.deployed || nodeGone)) {
           setEnabling(name)
           return
         }

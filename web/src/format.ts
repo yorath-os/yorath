@@ -51,3 +51,16 @@ export function checkedText(
   const age = min < 1 ? 'just now' : min < 120 ? `${min} min ago` : `${Math.round(min / 60)} h ago`
   return min > STALE_MIN || n.node_status !== 'active' ? `${age} · stale` : age
 }
+
+// When a key was last used, for agents connected by key (outside-agents-cluster).
+export function lastCallText(at: string | null, now: number = Date.now()): string {
+  if (!at) return 'no calls yet'
+  const min = Math.max(0, Math.round((now - Date.parse(at)) / 60_000))
+  return min < 1
+    ? 'just now'
+    : min < 120
+      ? `${min} min ago`
+      : min < 2880
+        ? `${Math.round(min / 60)} h ago`
+        : `${Math.round(min / 1440)} d ago`
+}

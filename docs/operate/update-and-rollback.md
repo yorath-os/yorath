@@ -6,7 +6,7 @@ description: "Update Yorath to a new release, roll back one step, or restore fro
 <!-- x-release-please-start-version -->
 ```sh
 yorath status            # which version is installed now
-yorath update 0.7.0      # update to this version
+yorath update 0.8.0      # update to this version
 ```
 <!-- x-release-please-end -->
 

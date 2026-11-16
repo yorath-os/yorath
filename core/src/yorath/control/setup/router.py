@@ -244,12 +244,14 @@ async def set_openrouter(data: OpenRouterIn, _: Owner, request: Request, db: Db)
     except SecretStoreUnavailable as exc:
         raise HTTPException(503, detail=str(exc)) from exc
     external = request.app.state.manifest.models.default_external
-    prices = await openrouter.fetch_pricing(
+    prices, window = await openrouter.fetch_model(
         request.app.state.http, settings.openrouter_url, data.api_key, external
     )
+    cap = request.app.state.manifest.models.external_context_max
     model = await register_model(
-        db, EXTERNAL_DEFAULT, ModelProvider.OPENROUTER, external, EXTERNAL_CLASSES, prices=prices
-    )
+        db, EXTERNAL_DEFAULT, ModelProvider.OPENROUTER, external, EXTERNAL_CLASSES, prices=prices,
+        context_length=min(window, cap) if window else openrouter.WINDOW_UNKNOWN,
+    )  # fmt: skip
     await set_setting(db, "openrouter_consent", True)
     return {
         "model": {
@@ -259,7 +261,8 @@ async def set_openrouter(data: OpenRouterIn, _: Owner, request: Request, db: Db)
             "input_price_per_mtok": str(prices[0]) if prices else None,
             "output_price_per_mtok": str(prices[1]) if prices else None,
         },
-        "warnings": [] if prices else ["pricing_unavailable"],
+        "warnings": ([] if prices else ["pricing_unavailable"])
+        + ([] if window else ["window_unavailable"]),
         "leaves_server": openrouter.LEAVES_SERVER,
     }
 
@@ -271,15 +274,22 @@ class TavilyIn(BaseModel):
 
 @router.put("/tavily")
 async def set_tavily(data: TavilyIn, _: Owner, request: Request) -> dict[str, Any]:
-    """No test request checks the key: it spends credit; the first search shows any error."""
+    """One search of one result tries the key (one credit): a rejected key is not saved; any other
+    failure saves it and says why search won't work yet (field-fixes-0-7)."""
     if not data.consent:
         raise HTTPException(422, detail="consent_required")
     store: DbSecretStore = request.app.state.secrets
+    answer = await tavily.probe(
+        request.app.state.http, request.app.state.settings.tavily_url, data.api_key
+    )
+    if answer == "invalid":
+        raise HTTPException(422, detail="invalid_api_key")
     try:
         await store.put(tavily.SECRET_NAME, data.api_key)
     except SecretStoreUnavailable as exc:
         raise HTTPException(503, detail=str(exc)) from exc
-    return {"leaves_server": tavily.LEAVES_SERVER}
+    warning = None if answer == "ok" else tavily.REASONS[answer]
+    return {"leaves_server": tavily.LEAVES_SERVER, "warning": warning}
 
 
 @router.post("/complete")

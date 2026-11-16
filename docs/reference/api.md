@@ -54,8 +54,12 @@ Every request is an execution of the built-in `model-api` agent (`hosting: exter
 `gateway`) on behalf of the key owner. The journal records the model, tokens, time, result and denials.
 The request and response text appears in neither the trace nor the audit.
 
-Only the local model is available through the endpoint: a request for `openrouter/default` gets 403
-`model_not_allowed`, the provider isn't called, and the denial is visible in the journal.
+**Which models a key may call.** A key calls "All models" (every chat model of the catalog; the
+external `openrouter/default` too, once OpenRouter is connected with your consent) or only the models
+ticked for it. Choose it when you create the key and change it on the API keys screen with "Change":
+the key stays the same. A model outside the key's set gets 403 `model_not_allowed`, the provider isn't
+called, and the denial is visible in the journal. Data classes still apply: a Confidential context
+never goes to an external model. Keys created before 0.8.0 keep the local models only.
 
 A revoked key and the key of a disabled user get 401. The owner sees and can revoke every user's keys.
 

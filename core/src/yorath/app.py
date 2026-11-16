@@ -21,6 +21,7 @@ from yorath.control.identity.router import router as identity_router
 from yorath.control.journal import Journal, retention_loop
 from yorath.control.journal.egress import egress_loop
 from yorath.control.journal.router import router as journal_router
+from yorath.control.setup.openrouter import refresh_external_windows
 from yorath.control.setup.router import router as setup_router
 from yorath.db import make_engine, make_sessions
 from yorath.distribution.health import db_check, ollama_check
@@ -84,6 +85,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.pdp.load(stored)  # empty table → the built-in set stays
         gateway.install(app)
         await app.state.indexer.schedule_pending()  # documents left unindexed before a restart
+        with suppress(httpx.HTTPError, OSError):  # an external model registered with the CPU window
+            await refresh_external_windows(
+                sessions, client, settings.openrouter_url, app.state.secrets,
+                app.state.manifest.models.external_context_max,
+            )  # fmt: skip
         app.state.checks = {
             "db": db_check(engine, settings.health_timeout_seconds),
             "ollama": ollama_check(client, settings.ollama_url, settings.health_timeout_seconds),

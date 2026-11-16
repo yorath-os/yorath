@@ -63,6 +63,7 @@ class AgentOut(BaseModel):
     revision: RevisionOut | None
     executions: ExecutionSummary
     cost_usd: Decimal
+    model: str | None = None  # chosen in the agent's settings; None: the md file's model
 
 
 class OutcomeOut(BaseModel):

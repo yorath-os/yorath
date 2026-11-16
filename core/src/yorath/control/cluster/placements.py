@@ -13,7 +13,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
@@ -30,6 +30,8 @@ from yorath.control.model import (
     ModelServer,
     Node,
     PlacementStatus,
+    get_setting,
+    set_setting,
 )
 from yorath.control.setup.budget import fits, footprint
 from yorath.control.setup.hardware import HardwareInfo, local_window
@@ -213,6 +215,8 @@ async def set_default(
     alias.alias_of = target.id
     _mirror(alias, target)
     await session.commit()
+    if source != "failover":  # the panel, the CLI or the wizard: the owner decided
+        await note_manual_default(session, target.name)
     if journal is not None:
         await journal.audit(
             AuditEventType.MODEL_REGISTERED,
@@ -225,6 +229,165 @@ async def set_default(
             },
         )  # fmt: skip
     return target
+
+
+# --- failover of the default (change field-fixes-0-7) ----------------------------------------
+
+FAILOVER_AFTER = timedelta(minutes=2)  # the default's servers silent this long: switch it
+FAILOVER = "default_failover"  # system setting: the last automatic switch and what became of it
+
+
+async def _servers_of(
+    session: AsyncSession, model: ModelResource
+) -> list[tuple[ModelServer, Node]]:
+    rows = await session.execute(
+        select(ModelServer, Node)
+        .join(ModelPlacement, ModelPlacement.model_server_id == ModelServer.id)
+        .join(Node, Node.id == ModelServer.node_id)
+        .where(
+            ModelPlacement.model_resource_id == model.id,
+            ModelPlacement.status == PlacementStatus.READY,
+        )
+    )
+    return [(s, n) for s, n in rows.all()]
+
+
+def _up(node: Node) -> bool:
+    return node.role == "main" or node.status == "active"
+
+
+async def failover_default(session: AsyncSession, journal: Journal | None) -> str | None:
+    """When no server of the default's model has answered for ``FAILOVER_AFTER``, point the
+    default at an available local model: on a GPU first, then the larger window. External models
+    are never chosen: data would leave the server without the owner's decision. The return of
+    the node is noted for the owner; the default is not moved back by itself."""
+    target = await default_target(session)
+    if target is None:
+        return None
+    state = await get_setting(session, FAILOVER) or None
+    servers = await _servers_of(session, target)
+    if any(_up(n) for _, n in servers):
+        if state and not state.get("closed") and state.get("to") == target.name:
+            origin = await session.scalar(
+                select(ModelResource).where(ModelResource.name == state["from"])
+            )
+            back = origin is not None and any(_up(n) for _, n in await _servers_of(session, origin))
+            if back and not state.get("node_back"):
+                await set_setting(session, FAILOVER, {**state, "node_back": True})
+        return None
+    seen = [at for _, n in servers if (at := n.last_seen_at or n.updated_at) is not None]
+    if seen and max(seen) > utcnow() - FAILOVER_AFTER:
+        return None  # the node may be back in a moment
+    candidates = (
+        await session.scalars(
+            select(ModelResource).where(
+                ModelResource.alias_of.is_(None),
+                ModelResource.provider == ModelProvider.OLLAMA,
+                ModelResource.name != LOCAL_EMBEDDINGS,
+                ModelResource.enabled.is_(True),
+                ModelResource.id != target.id,
+            )
+        )
+    ).all()
+    ranked = []
+    for model in candidates:
+        up = [s for s, n in await _servers_of(session, model) if _up(n)]
+        if up:
+            ranked.append((any(s.gpu_indexes for s in up), model.context_length, model.name, model))
+    if not ranked:
+        if not state or state.get("to") != target.name or state.get("closed"):
+            await set_setting(session, FAILOVER, {
+                "from": target.name, "to": None, "node": _node_name(servers),
+                "at": utcnow().isoformat(timespec="seconds"), "closed": False,
+            })  # fmt: skip
+        return None
+    ranked.sort(key=lambda r: (r[0], r[1], r[2]), reverse=True)
+    new = ranked[0][3]
+    await set_default(session, None, new.name, actor_id=None, source="failover")
+    node = _node_name(servers)
+    await set_setting(session, FAILOVER, {
+        "from": target.name, "to": new.name, "node": node,
+        "at": utcnow().isoformat(timespec="seconds"), "node_back": False, "closed": False,
+        "superseded": False,
+    })  # fmt: skip
+    log.warning("default model %s unavailable (node %s): switched to %s", target.name, node,
+                new.name)  # fmt: skip
+    if journal is not None:
+        await journal.audit(
+            AuditEventType.MODEL_DEFAULT_SWITCHED,
+            model=new.model_id,
+            details={"from": target.name, "to": new.name, "node": node, "reason": "node_lost"},
+        )
+    return new.name
+
+
+def _node_name(servers: list[tuple[ModelServer, Node]]) -> str | None:
+    return servers[0][1].name if servers else None
+
+
+async def note_manual_default(session: AsyncSession, model: str) -> None:
+    """The owner set the default after a switch: returning it closes the warning, another model
+    leaves only the node's return to report (no button to return)."""
+    state = await get_setting(session, FAILOVER)
+    if not state or state.get("closed"):
+        return
+    if catalog_name(model) == state.get("from"):
+        state = {**state, "closed": True}
+    else:
+        state = {**state, "superseded": True}
+    await set_setting(session, FAILOVER, state)
+
+
+class DefaultWarning(BaseModel):
+    """An automatic switch of the default the owner hasn't closed (change field-fixes-0-7)."""
+
+    switched_from: str
+    switched_to: str | None  # None: no model was available, the pointer stayed
+    node: str | None
+    at: str
+    node_back: bool
+    can_return: bool  # the node is back and the owner hasn't chosen another default since
+    short_window: list[str]  # connected agents on the default that the new window doesn't fit
+    model_unavailable: list[str]  # agents with their own model that has no server up
+
+
+async def default_warning(
+    session: AsyncSession, manifest: Manifest, chosen: dict[str, str]
+) -> DefaultWarning | None:
+    state = await get_setting(session, FAILOVER)
+    if not state or state.get("closed"):
+        return None
+    new = (
+        await session.scalar(select(ModelResource).where(ModelResource.name == state["to"]))
+        if state.get("to")
+        else None
+    )
+    short = sorted(
+        name
+        for name, spec in manifest.connected_agents.items()
+        if name not in chosen and new is not None and new.context_length < spec.min_context
+    )
+    lost: list[str] = []
+    for agent, model in sorted(chosen.items()):
+        row = await session.scalar(select(ModelResource).where(ModelResource.name == model))
+        if row is not None and row.provider == ModelProvider.OLLAMA:
+            target = await session.get(ModelResource, row.alias_of) if row.alias_of else row
+            if target is not None and not any(
+                _up(n) for _, n in await _servers_of(session, target)
+            ):
+                lost.append(agent)
+    back = bool(state.get("node_back"))
+    return DefaultWarning(
+        switched_from=state["from"], switched_to=state.get("to"), node=state.get("node"),
+        at=state["at"], node_back=back, can_return=back and not state.get("superseded"),
+        short_window=short, model_unavailable=lost,
+    )  # fmt: skip
+
+
+async def dismiss_failover(session: AsyncSession) -> None:
+    state = await get_setting(session, FAILOVER)
+    if state:
+        await set_setting(session, FAILOVER, {**state, "closed": True})
 
 
 # --- the catalog -----------------------------------------------------------------------------

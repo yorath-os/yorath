@@ -5,7 +5,15 @@ description: "The local model is the default; an external model through OpenRout
 
 Yorath answers with a **local model** by default: it runs in Ollama on your server, and nothing leaves the server. The setup wizard picks it for your hardware — `gemma4:e2b` without a GPU, `qwen3.5:9b` with one — see [Tested models and hardware](tested.md).
 
-An **external model** is optional. Add an OpenRouter key on the wizard's "External services" step and confirm that you agree to send data to it. Then agents whose file allows `openrouter/default` can use it — the Developer Agent uses it by default.
+An **external model** is optional. Add an OpenRouter key on the wizard's "External services" step and confirm that you agree to send data to it. Then any agent can use it: pick it under "Model" on the agent's card (Agents → the agent), Hermes and OpenClaw included; the Developer Agent uses it by default. Its context window comes from the OpenRouter catalog (up to 131,072 tokens). For clients of `/v1`, the key's models decide: see [API](../reference/api.md).
+
+## The agent's model
+
+Every agent uses `local/default` unless you choose another one under "Model" on its card, or with
+`yorath agent model <agent> <model>` (`default` to go back). The choice applies to the next requests;
+a connected agent (Hermes, OpenClaw) gets the model in its own settings and keeps its memory and bot.
+Hermes and OpenClaw need a context window of at least 65,536 tokens: a smaller model is refused with
+the reason. The chat shows the agent's model above the conversation.
 
 ## What may go to an external model
 

@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from yorath.control.agents import connected, custom, service
+from yorath.control.agents import connected, custom, model_choice, service
 from yorath.control.agents.schemas import AgentOut, ExecutionOut
 from yorath.control.identity.deps import Db, JournalDep, Owner
 from yorath.control.journal import AuditEventType
@@ -101,6 +101,24 @@ async def update_agent(
         details={"agent": name, "enabled": data.enabled},
     )
     return next(a for a in await service.list_agents(db) if a.name == name)
+
+
+class AgentModelIn(BaseModel):
+    model: str | None  # None: back to the model of the agent's md file
+
+
+@router.put("/{name}/model", response_model=AgentOut)
+async def set_agent_model(
+    name: str, data: AgentModelIn, owner: Owner, db: Db, journal: JournalDep, request: Request
+):
+    """The model the agent uses (field-fixes-0-7); a connected agent gets it at its next sync."""
+    try:
+        await model_choice.set_agent_model(
+            db, journal, request.app.state.manifest, owner.id, name, data.model
+        )
+    except model_choice.ModelChoiceError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "message": str(exc)}) from exc
+    return await _saved(db, name)
 
 
 @router.get("/{name}/executions", response_model=list[ExecutionOut])

@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import App from './App'
@@ -215,5 +215,49 @@ describe('Task manager', () => {
     })
     render(<App />)
     expect(await screen.findByText('No tasks match these filters')).toBeInTheDocument()
+  })
+})
+
+describe('The default model switched automatically', () => {
+  const WARNING = {
+    switched_from: 'local/qwen3.5:9b',
+    switched_to: 'local/gemma4:e2b',
+    node: 'vm13270',
+    at: '2026-11-16T15:40:00+00:00',
+    node_back: false,
+    can_return: false,
+    short_window: ['hermes'],
+    model_unavailable: [],
+  }
+
+  it('the desk says what moved where, why, and which agents the new window doesn’t fit', async () => {
+    stubApi({ ...BASE, 'GET /api/desk/summary': { ...SUMMARY, default_warning: WARNING } })
+    render(<App />)
+    const note = await screen.findByRole('region', { name: 'Default model' })
+    expect(note).toHaveTextContent(
+      'The default model switched automatically from qwen3.5:9b to gemma4:e2b: node vm13270 is unavailable.',
+    )
+    expect(note).toHaveTextContent('hermes needs a larger context window and won’t answer on gemma4:e2b')
+    expect(within(note).queryByRole('button', { name: /Return default/ })).not.toBeInTheDocument()
+  })
+
+  it('when the node is back the owner can return the model, or dismiss the warning', async () => {
+    let warning: typeof WARNING | null = { ...WARNING, node_back: true, can_return: true }
+    const api = stubApi({
+      ...BASE,
+      'GET /api/desk/summary': () => ({ status: 200, body: { ...SUMMARY, default_warning: warning } }),
+      'POST /api/cluster/models/default': () => {
+        warning = null
+        return { status: 200, body: { name: 'local/qwen3.5:9b', model_id: 'qwen3.5:9b' } }
+      },
+    })
+    render(<App />)
+    const note = await screen.findByRole('region', { name: 'Default model' })
+    expect(note).toHaveTextContent('vm13270 is back')
+    await userEvent.click(within(note).getByRole('button', { name: 'Return default to qwen3.5:9b' }))
+    expect(api.bodyOf('POST /api/cluster/models/default')).toEqual({ model: 'local/qwen3.5:9b' })
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: 'Default model' })).not.toBeInTheDocument(),
+    )
   })
 })

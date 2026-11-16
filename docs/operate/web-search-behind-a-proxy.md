@@ -16,8 +16,17 @@ see the [next section](#server-in-a-country-that-tavily-and-openrouter-block).
 
 ## Server in a country that Tavily and OpenRouter block
 
-Tavily and OpenRouter block Russian IPs: they answer 403 even to a valid key. The agent then answers
-"from memory", without links. To check:
+Tavily and OpenRouter block Russian IPs: they answer 403 even to a valid key. Yorath says so in three
+places:
+
+- the wizard, when you save the Tavily key: "Tavily refused this server's address (403) although the
+  key is valid…" — the key is saved, and search works once the server reaches Tavily from another
+  region (a wrong key, 401, is not saved: "Tavily rejected the key");
+- the agent's answer: the `web_search` step says the same instead of "HTTP 403";
+- the wizard, when you save the OpenRouter key: a 403 is named as a regional block, and the key is not
+  saved.
+
+To check by hand:
 
 ```sh
 curl -s -o /dev/null -w "%{http_code}\n" -X POST https://api.tavily.com/search \

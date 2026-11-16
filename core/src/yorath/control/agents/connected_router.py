@@ -110,6 +110,15 @@ class VersionIn(connected.BaseModel):
     )
 
 
+@router.post("/{name}/restart", response_model=connected.ConnectedOut)
+async def agent_restart(name: str, owner: Owner, db: Db, journal: JournalDep, request: Request):
+    try:
+        await connected.restart(db, journal, request.app.state.manifest, owner, name)
+    except connected.ConnectedError as exc:
+        raise _raise(exc) from exc
+    return await _one(db, request, name)
+
+
 @router.put("/{name}/version", response_model=connected.ConnectedOut)
 async def agent_version(
     name: str, data: VersionIn, owner: Owner, db: Db, journal: JournalDep, request: Request

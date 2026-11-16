@@ -146,9 +146,16 @@ describe('Journal', () => {
       ended_at: null,
       attributes: { 'gen_ai.input.messages': 'Peter Miller' },
     }
+    const root = {
+      ...span,
+      span_id: 's0',
+      name: 'execution document-assistant',
+      kind: 'execution',
+      attributes: { 'yorath.loop.tool_results_shortened': 2, 'yorath.loop.tool_results_removed': 1 },
+    }
     stubApi({
       ...BASE,
-      'GET /api/journal/executions/x1': { chain: [chain, child], events: [DENIED], spans: [span] },
+      'GET /api/journal/executions/x1': { chain: [chain, child], events: [DENIED], spans: [root, span] },
     })
     render(<Journal />)
     await userEvent.click(await screen.findByRole('button', { name: 'data.accessed' }))
@@ -156,6 +163,10 @@ describe('Journal', () => {
     expect(within(card).getByText(/child:/)).toHaveTextContent('research-agent')
     expect(within(card).getByText(/rows dropped: 1/)).toBeInTheDocument()
     expect(within(card).getByText(/Peter Miller/)).toBeInTheDocument()
+    // the loop cut tool results to fit the model's window: said in words, not only in the attributes
+    expect(
+      within(card).getByText(/Tool results cut to fit the model’s window: 2 shortened, 1 removed/),
+    ).toBeInTheDocument()
   })
 
   it('the next page starts from the time of the last event', async () => {

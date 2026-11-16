@@ -48,6 +48,7 @@ def openclaw_config(
     port: int,
     telegram_token: str | None = None,
     telegram_users: list[str] | None = None,
+    model: str = MODEL,
 ) -> AgentConfig:
     """``openclaw.json``: the ``yorath`` provider, the default model, a gateway with a token and an
     OpenAI endpoint.
@@ -73,7 +74,7 @@ def openclaw_config(
                     "api": "openai-completions",
                     "models": [
                         {
-                            "id": MODEL,
+                            "id": model,
                             "name": f"{PRODUCT_NAME} default",
                             "reasoning": False,
                             "input": ["text"],
@@ -85,7 +86,7 @@ def openclaw_config(
                 }
             },
         },
-        "agents": {"defaults": {"model": {"primary": f"yorath/{MODEL}"}}},
+        "agents": {"defaults": {"model": {"primary": f"yorath/{model}"}}},
     }
     env = {ENV_KEY: model_key, "OPENCLAW_GATEWAY_TOKEN": entry_token}
     if telegram_token:
@@ -104,13 +105,14 @@ def hermes_config(
     port: int,
     telegram_token: str | None = None,
     telegram_users: list[str] | None = None,
+    model: str = MODEL,
 ) -> AgentConfig:
     """``config.yaml`` (the ``model`` block) and ``.env`` lines: model key, API server, Telegram."""
     managed = {
         "model": {
             "provider": "custom",
             "base_url": CORE_URL,
-            "default": MODEL,
+            "default": model,
             "key_env": ENV_KEY,
             "context_length": context,
         }

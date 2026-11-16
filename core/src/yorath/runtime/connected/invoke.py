@@ -90,6 +90,18 @@ async def _chunks(response: httpx.Response) -> AsyncGenerator[str]:
                 yield text
 
 
+async def _restarting(session: AsyncSession, agent_id: Any) -> bool:
+    """Restart was asked and the node hasn't reported the agent running yet (field-fixes-0-7)."""
+    deployment = await session.scalar(
+        select(Deployment)
+        .join(AgentRevision, AgentRevision.id == Deployment.agent_revision_id)
+        .where(AgentRevision.agent_id == agent_id)
+        .order_by(Deployment.created_at.desc())
+        .limit(1)
+    )
+    return bool(deployment and deployment.settings.get("restarting"))
+
+
 async def run_connected(
     ctx: ExecutionContext,
     session: AsyncSession,
@@ -115,6 +127,8 @@ async def run_connected(
             ctx.root_span_id = root.span_id
             if token is None:
                 raise _Unavailable(f"agent {ctx.agent.name} is not connected: no endpoint token")
+            if await _restarting(session, ctx.agent.id):
+                raise _Unavailable(f"agent {ctx.agent.name} is restarting, retry in a minute")
             url = entry_url(spec, await agent_node_ip(session, ctx.agent.id))
             body = {"model": spec.model_name, "stream": True, "messages": agent_messages(messages)}
             try:

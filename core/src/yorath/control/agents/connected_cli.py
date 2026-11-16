@@ -10,7 +10,7 @@ import sys
 
 from sqlalchemy import select
 
-from yorath.control.agents import connected
+from yorath.control.agents import connected, model_choice
 from yorath.control.journal import Journal
 from yorath.control.journal.egress import read_report
 from yorath.control.model import User
@@ -42,6 +42,11 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     tg.add_argument("name")
     tg.add_argument("--off", action="store_true")
     tg.add_argument("--users", default="", help="who to answer: comma-separated ids")
+    rs = s.add_parser("restart", help="recreate the agent's container: same key, bot and memory")
+    rs.add_argument("name")
+    mdl = s.add_parser("model", help="the model the agent uses; 'default' for local/default")
+    mdl.add_argument("name")
+    mdl.add_argument("model")
     net = s.add_parser("internet", help="agent internet access: on | off")
     net.add_argument("name")
     net.add_argument("state", choices=["on", "off"])
@@ -115,12 +120,19 @@ async def run(a: argparse.Namespace) -> int:
                 )
                 await connected.set_channel(db, journal, store, manifest, owner, name, channel)
                 print(f"{name}: bot {'disconnected' if a.off else 'saved'}")
+            elif a.agent_cmd == "restart":
+                await connected.restart(db, journal, manifest, owner, name)
+                print(f"{name}: restarting; it answers again within a minute: yorath agent list")
+            elif a.agent_cmd == "model":
+                chosen = None if a.model in ("default", "local/default") else a.model
+                await model_choice.set_agent_model(db, journal, manifest, owner.id, name, chosen)
+                print(f"{name}: model {chosen or 'local/default'}; new requests go to it")
             elif a.agent_cmd == "internet":
                 on = a.state == "on"
                 await connected.set_network(db, journal, manifest, owner, name, on)
                 print(f"{name}: internet {'on' if on else 'off'}")
         return 0
-    except connected.ConnectedError as exc:
+    except (connected.ConnectedError, model_choice.ModelChoiceError) as exc:
         print(f"error ({exc.code}): {exc}", file=sys.stderr)
         return 2
     finally:

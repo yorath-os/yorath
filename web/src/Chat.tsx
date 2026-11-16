@@ -149,13 +149,6 @@ export default function Chat() {
   const [agents, setAgents] = useState<ChatAgent[]>([])
   const [newAgent, setNewAgent] = useState('')
   const [models, setModels] = useState<ChatModel[]>([])
-  const [model, setModel] = useState<string>(() => {
-    try {
-      return localStorage.getItem('yorath.chat.model') ?? ''
-    } catch {
-      return ''
-    }
-  })
   const bottom = useRef<HTMLDivElement>(null)
   const abort = useRef<AbortController | null>(null)
   const busy = draft !== null
@@ -188,8 +181,21 @@ export default function Chat() {
     void load()
   }, [agentName])
 
+  // Only the conversation scrolls, never the page (Safari moved the whole desk away), and only while the user
+  // is at its end: reading an older answer is not interrupted by the next tokens.
+  const atEnd = useRef(true)
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: 'smooth' })
+    const log = bottom.current?.closest<HTMLElement>('.a3-chat__scroll')
+    if (!log) return
+    const onScroll = () => {
+      atEnd.current = log.scrollHeight - log.scrollTop - log.clientHeight < 80
+    }
+    log.addEventListener('scroll', onScroll)
+    return () => log.removeEventListener('scroll', onScroll)
+  })
+  useEffect(() => {
+    const log = bottom.current?.closest<HTMLElement>('.a3-chat__scroll')
+    if (log && atEnd.current) log.scrollTop = log.scrollHeight
   }, [messages, draft, failure])
 
   const waiting = draft !== null && !draft.text && !draft.error
@@ -282,15 +288,8 @@ export default function Chat() {
     await open(r.body.id)
   }
 
-  const currentModel = models.find((m) => m.name === model) ?? models.find((m) => m.default) ?? models[0]
-  const choose = (name: string) => {
-    setModel(name)
-    try {
-      localStorage.setItem('yorath.chat.model', name)
-    } catch {
-      // the model choice lives only until the page reloads
-    }
-  }
+  // The agent's model is chosen in its settings, not here (change field-fixes-0-7)
+  const currentModel = models.find((m) => m.default) ?? models[0]
 
   const send = async (text: string) => {
     let id = current
@@ -348,7 +347,7 @@ export default function Chat() {
       title={`Chat · ${agent?.name ?? 'agent'}`}
       technical={false}
       agentName={agent?.name ?? ''}
-      meta={currentModel && models.length === 1 ? [`model: ${currentModel.model_id}`] : []}
+      meta={[]}
       messages={log}
       draft={input}
       onDraftChange={setInput}
@@ -399,24 +398,22 @@ export default function Chat() {
                 {({ id }) => <input id={id} className="a3-input" value={agent.name} readOnly />}
               </Field>
             )}
-            {models.length > 1 && (
+            {currentModel && (
               <Field label="Model">
                 {({ id }) => (
-                  <select
+                  <input
                     id={id}
                     className="a3-input"
-                    value={currentModel?.name ?? ''}
-                    onChange={(e) => choose(e.target.value)}
-                    disabled={busy}
-                  >
-                    {models.map((m) => (
-                      <option key={m.name} value={m.name}>
-                        {m.leaves_server ? 'External' : 'Local'}: {m.model_id} ({m.data_classes.join(', ')})
-                      </option>
-                    ))}
-                  </select>
+                    readOnly
+                    value={`${currentModel.leaves_server ? 'External' : 'Local'}: ${currentModel.model_id}`}
+                  />
                 )}
               </Field>
+            )}
+            {agent && (
+              <p className="a3-text-xs">
+                <a href={`#agents-list/${agent.name}`}>Change the model in the agent’s settings</a>
+              </p>
             )}
           </div>
           {currentModel?.leaves_server && (

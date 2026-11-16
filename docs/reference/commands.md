@@ -26,6 +26,8 @@ Agents, nodes and models in a cluster:
 |---|---|
 | `yorath agent add <openclaw\|hermes> [--node <node>] [--version <v>] [--telegram]` | install a connected agent — [OpenClaw and Hermes](../agents/openclaw-and-hermes.md) |
 | `yorath agent list \| logs \| remove [--purge] \| upgrade \| internet <on\|off> \| telegram` | manage connected agents |
+| `yorath agent restart <agent>` | recreate a connected agent's container: same key, bot and memory |
+| `yorath agent model <agent> <model\|default>` | the model an agent uses — [Local and external models](../models/local-and-external.md#the-agents-model) |
 | `yorath node token \| list \| approve \| revoke \| status \| set-classes` | cluster nodes — [Add a server](../cluster/add-a-server.md) |
 | `yorath model pull <name> --node <node> [--gpu N] [--replace]`, `yorath model default`, `yorath model remove` | models on nodes — [Models on cluster nodes](../models/on-cluster-nodes.md) |
 

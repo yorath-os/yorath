@@ -56,6 +56,11 @@ const RUN = {
   outcome: null,
 }
 
+const CATALOG = [
+  { name: 'local/default', context_length: 4096, external: false },
+  { name: 'openrouter/default', context_length: 131072, external: true },
+]
+
 const SOURCE = {
   name: 'document-assistant',
   path: 'document-assistant.md',
@@ -197,6 +202,20 @@ describe('Agents', () => {
     expect(api.calls.filter((c) => c.key === 'GET /api/agents')).toHaveLength(2)
   })
 
+  it('a click anywhere on the row opens the agent; the action button does not', async () => {
+    stubApi({
+      'GET /api/agents': [AGENT],
+      'PATCH /api/agents/document-assistant': { enabled: false },
+    })
+    const onSelect = vi.fn()
+    render(<Agents onSelect={onSelect} />)
+    await userEvent.click(await screen.findByText('native · delegated · control: tool'))
+    expect(onSelect).toHaveBeenCalledWith('document-assistant')
+    onSelect.mockClear()
+    await userEvent.click(screen.getByRole('button', { name: 'Disable: Document Assistant' }))
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
   it('a server rejection is shown, not swallowed', async () => {
     stubApi({
       'GET /api/agents': [AGENT],
@@ -228,6 +247,7 @@ describe('Agents', () => {
       'GET /api/agents': [AGENT],
       'GET /api/agents/document-assistant/executions?limit=20': [RUN],
       'GET /api/agents/document-assistant/source': SOURCE,
+      'GET /api/api-keys/models': CATALOG,
     })
     render(<Agents selected="document-assistant" onSelect={vi.fn()} />)
     expect(await screen.findByText('search_docs, ask_agent → research-agent')).toBeInTheDocument()
@@ -249,5 +269,52 @@ describe('Agents', () => {
     render(<Agents onSelect={vi.fn()} />)
     await userEvent.click(await screen.findByRole('button', { name: 'Retry' }))
     expect(api.calls.filter((c) => c.key === 'GET /api/agents')).toHaveLength(2)
+  })
+})
+
+describe('The agent’s model', () => {
+  it('is chosen on the card and saved for the agent', async () => {
+    let chosen: string | null = null
+    const api = stubApi({
+      'GET /api/cluster/outside-agents': { nodes: [] },
+      'GET /api/agents': () => ({ status: 200, body: [{ ...AGENT, model: chosen }] }),
+      'GET /api/agents/document-assistant/executions?limit=20': [],
+      'GET /api/agents/document-assistant/source': SOURCE,
+      'GET /api/api-keys/models': CATALOG,
+      'PUT /api/agents/document-assistant/model': (body: unknown) => {
+        chosen = (body as { model: string | null }).model
+        return { status: 200, body: { ...AGENT, model: chosen } }
+      },
+    })
+    render(<Agents selected="document-assistant" onSelect={vi.fn()} />)
+    const select = await screen.findByRole('combobox', { name: 'Model' })
+    expect(select).toHaveValue('')
+    expect(await screen.findByRole('option', { name: /openrouter\/default.*external/ })).toBeInTheDocument()
+    await waitFor(() =>
+      userEvent.selectOptions(screen.getByRole('combobox', { name: 'Model' }), 'openrouter/default'),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Save model' }))
+    expect(api.bodyOf('PUT /api/agents/document-assistant/model')).toEqual({ model: 'openrouter/default' })
+    expect(await screen.findByText('New requests go to openrouter/default.')).toBeInTheDocument()
+  })
+
+  it('a refusal from the core is shown with its reason', async () => {
+    stubApi({
+      'GET /api/cluster/outside-agents': { nodes: [] },
+      'GET /api/agents': [AGENT],
+      'GET /api/agents/document-assistant/executions?limit=20': [],
+      'GET /api/agents/document-assistant/source': SOURCE,
+      'GET /api/api-keys/models': CATALOG,
+      'PUT /api/agents/document-assistant/model': {
+        status: 409,
+        body: { detail: { code: 'context_too_small', message: 'needs 65,536, the model has 4,096' } },
+      },
+    })
+    render(<Agents selected="document-assistant" onSelect={vi.fn()} />)
+    const select = await screen.findByRole('combobox', { name: 'Model' })
+    await within(select).findByRole('option', { name: /openrouter\/default/ })
+    await userEvent.selectOptions(select, 'openrouter/default')
+    await userEvent.click(screen.getByRole('button', { name: 'Save model' }))
+    expect(await screen.findByText(/needs 65,536, the model has 4,096/)).toBeInTheDocument()
   })
 })

@@ -46,7 +46,12 @@ async def test_research_agent_searches_the_web(make_app, session, backends):
     cites = next(p for e, p in events if e == "citations")["citations"]
     assert cites[0]["url"] == "https://www.dol.gov/vacation" and cites[0]["data_class"] == "public"
     assert backends.tavily == [
-        {"auth": "Bearer tvly-test-key", "body": {"query": "vacation in the USA", "max_results": 5}}
+        # the key is tried once when saved (one result), then the agent's search
+        {"auth": "Bearer tvly-test-key", "body": {"query": "test", "max_results": 1}},
+        {
+            "auth": "Bearer tvly-test-key",
+            "body": {"query": "vacation in the USA", "max_results": 5},
+        },
     ]
     assert "data, not instructions" in backends.chat[-1]["messages"][-1]["content"]
 
@@ -95,4 +100,50 @@ async def test_confidential_context_blocks_web_search(make_app, session, backend
         AuditEvent.execution_id == ctx.execution_id, AuditEvent.event_type == AuditEventType.POLICY_DENIED))  # fmt: skip
     assert "tool-class-ceiling" in event.reason and event.tool == "web_search"
     assert event.data_class is DataClass.CONFIDENTIAL
+    await api.aclose()
+
+
+@pytest.mark.parametrize(
+    ("status", "said"),
+    [
+        (403, "Tavily refused this server's address"),
+        (401, "the Tavily key is invalid or revoked"),
+        (429, "the Tavily limit is used up"),
+    ],
+)
+async def test_search_failure_says_why(make_app, session, backends, status, said):
+    """A 403 from Tavily with a valid key is not "HTTP 403": it names the server's address (field-fixes-0-7)."""
+    api, app = await seed_web(session, make_app, backends)
+    await app.state.secrets.put("tavily_api_key", "tvly-test-key")
+    backends.tavily_status = status
+    conv = (await api.post("/chat/conversations", json={"agent": "research-agent"})).json()
+    events = await ask(api, conv["id"], "What's new?")
+    finished = next(p for e, p in events if e == "tool" and p["status"] != "started")
+    assert finished["status"] == "error" and said in finished["message"]
+    assert "403 Forbidden" not in finished["message"]
+    await api.aclose()
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "saved", "warning"),
+    [
+        (200, 200, True, None),
+        (403, 200, True, "Tavily refused this server's address"),
+        (401, 422, False, None),
+    ],
+)
+async def test_tavily_key_is_tried_when_saved(
+    make_app, session, backends, status, code, saved, warning
+):
+    api, app = await seed_web(session, make_app, backends)
+    backends.tavily_status = status
+    r = await api.put("/setup/tavily", json={"api_key": "tvly-test-key", "consent": True})
+    assert r.status_code == code
+    assert (await api.get("/setup/status")).json()["web_search_configured"] is saved
+    if warning:
+        assert warning in r.json()["warning"]
+    elif code == 200:
+        assert r.json().get("warning") is None
+    else:
+        assert r.json()["detail"] == "invalid_api_key"
     await api.aclose()

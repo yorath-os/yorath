@@ -51,6 +51,16 @@ contains "a private repository: the token goes into a variable first" "$out" 'T=
 contains "and the clone uses that variable" "$out" 'git clone --branch v0.7.3 "https://$T@github.com/yorath-os/private.git" /opt/yorath'
 case "$out" in *ghp_secret123*) fail "the token of this server is never printed" "$out" ;; *) ok "the token of this server is never printed" ;; esac
 
+# yorath help lists every command the dispatcher knows (field-fixes-0-7: `node` was cut off)
+help_out="$( ( export YORATH_SOURCE_ONLY=1 YORATH_DIR="$T/inst" YORATH_SELF_COPY="$ROOT/installer/yorath.sh"; . "$ROOT/installer/yorath.sh"; cmd_help ) 2>&1)"
+contains "yorath help lists the node commands" "$help_out" "yorath node token|list|approve|revoke|sync"
+contains "and node set-classes" "$help_out" "yorath node set-classes"
+missing=""
+for c in $(sed -n '/^case "\$cmd" in/,/^esac/p' "$ROOT/installer/yorath.sh" | sed -n 's/^  \([a-z][a-z-]*\)).*/\1/p'); do
+  case "$help_out" in *"yorath $c"*) ;; *) missing="$missing $c" ;; esac
+done
+expect "every command of the dispatcher is in yorath help" "$missing" ""
+
 # re-run on an installed server (R5): the installed copy's own installer runs, with the same arguments
 mkdir -p "$T/old/installer" && printf 'distribution:\n  name: yorath\n  version: 0.6.0 # x-release-please-version\n' > "$T/old/distribution.yaml"
 printf 'echo "installed copy runs: $* version=[${YORATH_VERSION:-}]"\n' > "$T/old/installer/install.sh"

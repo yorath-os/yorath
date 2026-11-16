@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { fetchSetupStatus, type SetupStatus } from './api'
+import { fetchDeskSummary, fetchSetupStatus, type DefaultWarning, type SetupStatus } from './api'
+import { DefaultWarningNotice } from './DefaultWarning'
 import { asDataClass } from './format'
 import { Button } from './ui/Controls'
 import { DataTable } from './ui/DataTable'
@@ -58,6 +59,7 @@ export default function Models({ onOpenWizard }: { onOpenWizard: () => void }) {
           onEmptyAction={onOpenWizard}
         >
           <div className="a3-stack">
+            <ModelsDefaultWarning />
             <Placements onChanged={() => void load()} />
             <DataTable
               caption="Registered models"
@@ -110,4 +112,20 @@ export default function Models({ onOpenWizard }: { onOpenWizard: () => void }) {
       </Window>
     </div>
   )
+}
+
+// The same warning as on the Desk: the default moved off a lost node (change field-fixes-0-7)
+function ModelsDefaultWarning() {
+  const [warning, setWarning] = useState<DefaultWarning | null>(null)
+  const load = useCallback(async () => {
+    const r = await fetchDeskSummary()
+    setWarning(r.status === 200 ? (r.body.default_warning ?? null) : null)
+  }, [])
+  useEffect(() => {
+    const first = async () => {
+      await load()
+    }
+    void first()
+  }, [load])
+  return warning ? <DefaultWarningNotice warning={warning} onChanged={() => void load()} /> : null
 }

@@ -16,9 +16,19 @@ from tests.fixtures.corpus import AGENTS_DIR, OWNER
 from tests.fixtures.world import ask
 from yorath.control.agents.loader import sync_agents_dir
 from yorath.control.journal import AuditEvent, AuditEventType
-from yorath.control.model import ModelResource, Node, Policy, Secret, get_setting
+from yorath.control.model import (
+    DataClass,
+    ModelProvider,
+    ModelResource,
+    Node,
+    Policy,
+    Secret,
+    get_setting,
+)
 from yorath.control.setup.hardware import HardwareInfo
 from yorath.control.setup.inventory import upsert_node
+from yorath.control.setup.ollama import register_model
+from yorath.control.setup.openrouter import refresh_external_windows
 from yorath.enforcement.secrets import DbSecretStore, SecretStoreUnavailable
 
 pytestmark = pytest.mark.group
@@ -222,7 +232,9 @@ async def test_budget_blocks_model_that_does_not_fit_and_unloads_previous(make_a
 
 async def test_openrouter_prices_from_catalog(make_app, session, backends):
     pricing = {"prompt": "0.000002", "completion": "0.00001"}
-    backends.openrouter_models = [{"id": "openai/gpt-5.6-luna", "pricing": pricing}]
+    backends.openrouter_models = [
+        {"id": "openai/gpt-5.6-luna", "pricing": pricing, "context_length": 200000}
+    ]
     key = Fernet.generate_key().decode()
     api = await owner_client(make_app, secret_key=key, openrouter_url="http://openrouter/api/v1")
     r = await api.put("/setup/openrouter", json={"api_key": "sk-or-valid-key", "consent": True})
@@ -238,11 +250,54 @@ async def test_openrouter_prices_from_catalog(make_app, session, backends):
     await api.aclose()
 
 
+@pytest.mark.parametrize(
+    ("catalog", "window"), [(1_050_000, 131072), (65536, 65536), (None, 32768)]
+)
+async def test_openrouter_window_from_catalog(make_app, session, backends, catalog, window):
+    """The external model's window comes from the provider's catalog, capped; never 4,096 (field-fixes-0-7)."""
+    item = {"id": "openai/gpt-5.6-luna", "pricing": {"prompt": "0.000002", "completion": "0.00001"}}
+    backends.openrouter_models = [{**item, "context_length": catalog}] if catalog else []
+    key = Fernet.generate_key().decode()
+    api = await owner_client(make_app, secret_key=key, openrouter_url="http://openrouter/api/v1")
+    r = await api.put("/setup/openrouter", json={"api_key": "sk-or-valid-key", "consent": True})
+    assert r.status_code == 200
+    row = await session.scalar(
+        select(ModelResource).where(ModelResource.name == "openrouter/default")
+    )
+    await session.refresh(row)
+    assert row.context_length == window
+    assert ("window_unavailable" in r.json()["warnings"]) is (catalog is None)
+    await api.aclose()
+
+
+async def test_external_model_with_the_old_window_gets_it_from_the_catalog(
+    make_app, sessions, session, backends
+):
+    """An install connected before 0.8.0 has openrouter/default with 4,096: the core start fixes it."""
+    key = Fernet.generate_key().decode()
+    app = make_app(secret_key=key, openrouter_url="http://openrouter/api/v1")
+    await app.state.secrets.put("openrouter_api_key", "sk-or-valid-key")
+    await register_model(
+        session, "openrouter/default", ModelProvider.OPENROUTER, "openai/gpt-5.6-luna",
+        [DataClass.PUBLIC], context_length=4096,
+    )  # fmt: skip
+    backends.openrouter_models = [{"id": "openai/gpt-5.6-luna", "context_length": 1_050_000}]
+    await refresh_external_windows(
+        sessions, app.state.http, "http://openrouter/api/v1", app.state.secrets, 131072
+    )
+    row = await session.scalar(
+        select(ModelResource).where(ModelResource.name == "openrouter/default")
+    )
+    await session.refresh(row)
+    assert row.context_length == 131072
+
+
 async def test_openrouter_catalog_without_model_warns(make_app):
     key = Fernet.generate_key().decode()
     api = await owner_client(make_app, secret_key=key, openrouter_url="http://openrouter/api/v1")
     r = await api.put("/setup/openrouter", json={"api_key": "sk-or-valid-key", "consent": True})
-    assert r.status_code == 200 and r.json()["warnings"] == ["pricing_unavailable"]
+    assert r.status_code == 200
+    assert r.json()["warnings"] == ["pricing_unavailable", "window_unavailable"]
     await api.aclose()
 
 

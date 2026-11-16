@@ -103,6 +103,9 @@ class Models(_Strict):
     default_gpu: str
     quality_cpu: str | None = None
     default_external: str = Field(description="OpenRouter slug for hybrid mode")
+    external_context_max: int = Field(
+        default=131072, ge=4096, description="cap of an external model's window from its catalog"
+    )
     by_hardware: list[HardwareTier]
     catalog: dict[str, ModelFootprint] = {}
     memory: MemoryPolicy = MemoryPolicy()

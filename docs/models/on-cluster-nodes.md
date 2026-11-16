@@ -52,6 +52,14 @@ that actually answered.
 gets `model_unavailable` with the reason (`node node-2 is lost`). Yorath never answers with another
 model instead.
 
+**When the default model's node is lost.** If no server of the model behind `local/default` has
+answered for two minutes, `local/default` moves to a local model that is up: one on a GPU first, then
+the one with the larger context window. It never moves to an external model. The Desk and the Models
+window say what moved where and why, and which agents the new window doesn't fit (Hermes and OpenClaw
+need 65,536 tokens); the switch is in the audit as `model.default.switched`. Agents with a model chosen
+on their card are not switched. When the node is back, the warning says so and offers "Return default
+to …"; Yorath doesn't move the default back by itself.
+
 **The main node without a chat model.** Place the model on a node, point `local/default` at it, then
 `yorath model remove <old model>`: the main node keeps the panel, the checks, the journal and the
 document search model, and gives its memory away. Removing the last placement of the default model

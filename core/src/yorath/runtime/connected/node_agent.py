@@ -215,8 +215,10 @@ def plan(item: dict[str, Any], current: Container | None, manifest: Manifest) ->
         "yorath.image": item["image"],
         "yorath.config": item["config_sha"],
         "yorath.pull": item.get("pull_nonce", ""),
+        "yorath.restart": item.get("restart_nonce", ""),  # Restart: same image and volume
     }
-    stale = current is None or any(current.labels.get(k) != v for k, v in want.items())
+    # a label the container doesn't have yet is empty: an update adding one recreates nothing
+    stale = current is None or any(current.labels.get(k, "") != v for k, v in want.items())
     if stale:
         p.recreate = True
         p.pull = current is None or current.labels.get("yorath.pull") != want["yorath.pull"]
@@ -253,6 +255,7 @@ def container_spec(item: dict[str, Any], network: str) -> dict[str, Any]:
             "yorath.image": item["image"],
             "yorath.config": item["config_sha"],
             "yorath.pull": item.get("pull_nonce", ""),
+            "yorath.restart": item.get("restart_nonce", ""),
         },
         "cap_drop": ["ALL"],
         "cap_add": item.get("cap_add") or [],

@@ -17,6 +17,7 @@ from pydantic import BaseModel, BeforeValidator, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yorath.control.agents.model_choice import agent_model
 from yorath.control.cluster.service import NodeHardware
 from yorath.control.identity.api_keys import issue_api_key, revoke_api_key
 from yorath.control.journal import AuditEventType, Journal
@@ -93,6 +94,8 @@ class ConnectedOut(BaseModel):
     # detail, checked_at; None until the first check (change telegram-check)
     telegram_check: dict[str, Any] | None = None
     node: str | None  # cluster node (change cluster-nodes); None means the main node
+    # connected before and not removed: enabling it again needs no form (field-fixes-0-7)
+    deployed: bool = False
     status: str | None  # Instance: starting | running | stopped | failed | lost
     status_detail: str | None
     running_version: str | None
@@ -202,8 +205,8 @@ async def _gpu_server(session: AsyncSession) -> str | None:
     return f"{row[0]}/{row[1]}" if row else None
 
 
-async def _window(session: AsyncSession) -> int:
-    resource = await session.scalar(select(ModelResource).where(ModelResource.name == MODEL))
+async def _window(session: AsyncSession, model: str = MODEL) -> int:
+    resource = await session.scalar(select(ModelResource).where(ModelResource.name == model))
     return resource.context_length if resource else 0
 
 
@@ -227,10 +230,11 @@ async def connect(
             "network control is off on the node: without it the agent has direct internet access. "
             "Turn it on: yorath egress on",
         )  # fmt: skip
-    window = await _window(session)
+    model = await agent_model(session, name) or MODEL  # its own model, chosen in its settings
+    window = await _window(session, model)
     if window < found.spec.min_context:
         need = (
-            f"the agent needs a {MODEL} context window of {found.spec.min_context}+ tokens, "
+            f"the agent needs a {model} context window of {found.spec.min_context}+ tokens, "
             f"currently {window}. "
         )
         gpu = await _gpu_server(session)
@@ -400,6 +404,27 @@ async def check_telegram(session: AsyncSession, manifest: Manifest, name: str) -
     await session.commit()
 
 
+async def restart(
+    session: AsyncSession, journal: Journal, manifest: Manifest, owner: User, name: str
+) -> None:
+    """The container is recreated on its node with the same key, bot, memory and version
+    (field-fixes-0-7); until the node reports it running the agent is "restarting"."""
+    found = await _find(session, manifest, name)
+    deployment = found.deployment
+    if deployment is None or not (deployment.enabled and found.agent.enabled):
+        raise ConnectedError(409, "agent_disabled", f"agent {name} is disabled: enable it instead")
+    deployment.settings = {
+        **deployment.settings, "restart_nonce": secrets.token_hex(4), "restarting": True,
+    }  # fmt: skip
+    await session.commit()
+    await journal.audit(
+        AuditEventType.AGENT_RESTARTED,
+        actor_principal_id=owner.id,
+        agent_id=found.agent.id,
+        details={"agent": name},
+    )
+
+
 async def set_version(
     session: AsyncSession, journal: Journal, manifest: Manifest, owner: User, name: str,
     version: str | None,
@@ -460,6 +485,11 @@ async def catalog(session: AsyncSession, manifest: Manifest) -> list[ConnectedOu
                 untested=bool(deployment and deployment.runtime_version),
                 network_enabled=deployment.network_enabled if deployment else True,
                 node=node.name if node else None,
+                deployed=bool(
+                    deployment
+                    and not deployment.settings.get("removed")
+                    and not deployment.settings.get("purge")
+                ),
                 telegram=bool(deployment and deployment.channel_hash),
                 telegram_users=deployment.settings.get("telegram_users", []) if deployment else [],
                 telegram_check=(
@@ -467,7 +497,13 @@ async def catalog(session: AsyncSession, manifest: Manifest) -> list[ConnectedOu
                     if instance and live and deployment and deployment.channel_hash
                     else None
                 ),
-                status=instance.status.value if instance and live else None,
+                status=(
+                    "restarting"
+                    if live and deployment and deployment.settings.get("restarting")
+                    else instance.status.value
+                    if instance and live
+                    else None
+                ),
                 status_detail=instance.status_detail if instance and live else None,
                 running_version=installation.version if installation else None,
                 running_digest=installation.path if installation else None,
@@ -517,10 +553,12 @@ async def desired_state(
             detail = "no agent key: connect again"
             agents.append(item | {"state": "stopped", "detail": detail})
             continue
+        model = await agent_model(session, name) or MODEL  # chosen in its settings
+        model_window = window if model == MODEL else await _window(session, model)
         config: AgentConfig = BUILDERS[name](  # card runtime = catalog agent name
-            key, entry, max(window, spec.min_context), spec.port,
+            key, entry, max(model_window, spec.min_context), spec.port,
             await store.get(secret_name(name, "telegram")),
-            deployment.settings.get("telegram_users") or [],
+            deployment.settings.get("telegram_users") or [], model,
         )  # fmt: skip
         agents.append(
             item
@@ -530,6 +568,7 @@ async def desired_state(
                 "image": spec.image(deployment.runtime_version),
                 "repository": spec.repository,
                 "pull_nonce": deployment.settings.get("pull_nonce", ""),
+                "restart_nonce": deployment.settings.get("restart_nonce", ""),
                 "port": spec.port,
                 "health_path": spec.health_path,
                 "user": spec.user,
@@ -692,6 +731,10 @@ async def apply_report(session: AsyncSession, report: NodeReport, node: Node | N
         if status is InstanceStatus.STOPPED and instance.status is not InstanceStatus.STOPPED:
             instance.stopped_at = now
         instance.status = status
+        if status is InstanceStatus.RUNNING and deployment.settings.get("restarting"):
+            deployment.settings = {
+                k: v for k, v in deployment.settings.items() if k != "restarting"
+            }
         instance.status_detail = item.detail
         instance.external_ref = item.container_id
         instance.reported_at = now

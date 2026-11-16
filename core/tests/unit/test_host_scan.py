@@ -124,3 +124,13 @@ def test_host_out_summary(hs):
     assert hs.parse_host_out(log) == [
         {"dst": "140.82.121.4", "proto": "TCP", "port": "22", "uid": "0", "count": 2}
     ]
+
+
+def test_container_in_host_network_has_no_addresses(hs, monkeypatch):
+    # Docker 29 prints an empty address as "invalid IP": a host-network container has none of its own
+    outputs = {
+        "ps": "id1\nid2\n",
+        "inspect": "/yorath-egress-1 invalid IP \n/web 172.18.0.3 \n",
+    }
+    monkeypatch.setattr(hs, "_run", lambda cmd, timeout=20: outputs[cmd[1]])
+    assert hs.container_ips() == {"yorath-egress-1": [], "web": ["172.18.0.3"]}

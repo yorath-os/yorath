@@ -22,9 +22,10 @@ from yorath.runtime.agent_loop import (
     build_messages,
     run,
 )
-from yorath.runtime.agent_loop.loop import ANSWER_NUDGE, NUDGE, TRIMMED
+from yorath.runtime.agent_loop.loop import ANSWER_NUDGE, NUDGE, TRIMMED, Trim
 from yorath.runtime.llm import ChatChunk, ChatMessage, ToolCall, Usage
 from yorath.runtime.tools.types import Citation, ToolResult
+from yorath.runtime.tools.web_search import render
 
 SEARCH = {"type": "function", "function": {"name": "search_docs", "parameters": {"type": "object"}}}
 
@@ -232,7 +233,7 @@ def msg(role: MessageRole, text: str) -> Message:
     return Message(conversation_id=uuid.uuid7(), role=role, content=text)
 
 
-def test_budget_trims_tool_results_then_history():
+def test_budget_shortens_tool_results_then_drops_history():
     history = [msg(MessageRole.USER, "legacy" * 700), msg(MessageRole.ASSISTANT, "answer")]
     steps = [
         ChatMessage(role="assistant", tool_calls=[ToolCall(id="c0", name="search_docs")]),
@@ -240,18 +241,17 @@ def test_budget_trims_tool_results_then_history():
         ChatMessage(role="assistant", tool_calls=[ToolCall(id="c1", name="search_docs")]),
         ChatMessage(role="tool", name="search_docs", tool_call_id="c1", content="y" * 5000),
     ]
-    messages = build_messages("SYS", history, "q", steps, num_ctx=4096)  # budget ≈ 8600 chars
+    trim = Trim()
+    messages = build_messages("SYS", history, "q", steps, num_ctx=4096, trim=trim)  # ≈ 8600 chars
     tools_msgs = [m for m in messages if m.role == "tool"]
-    assert (
-        tools_msgs[0].content == TRIMMED and tools_msgs[1].content == "y" * 5000
-    )  # the old one is cut
+    # both results stay, shortened, instead of the old one dropped whole
+    assert [m.content[0] for m in tools_msgs] == ["x", "y"]
+    assert all(m.content.endswith("…") and len(m.content) < 5000 for m in tools_msgs)
+    assert (trim.shortened, trim.removed) == (2, 0)
     assert messages[0].content.startswith("SYS\n\n") and messages[0].role == "system"
-    assert all(m.content != "legacy" * 700 for m in messages) and any(
-        m.content == "answer" for m in messages
-    )
+    assert all(m.content != "legacy" * 700 for m in messages)
     assert [m.role for m in messages] == [
         "system",
-        "assistant",
         "user",
         "assistant",
         "tool",
@@ -259,6 +259,43 @@ def test_budget_trims_tool_results_then_history():
         "tool",
     ]
     assert steps[1].content == "x" * 5000  # the original steps are not mutated
+
+
+def test_five_search_results_in_a_small_window_all_reach_the_model():
+    """5 web results of 4,000 characters each at a 4,096-token window: every [n] with its title and
+    URL reaches the model, the text shortened (field-fixes-0-7: the model saw none of them)."""
+    results = [
+        {"title": f"Title {i}", "url": f"https://example.com/{i}", "content": "z" * 4000}
+        for i in range(1, 6)
+    ]
+    steps = [
+        ChatMessage(role="assistant", tool_calls=[ToolCall(id="c0", name="web_search")]),
+        ChatMessage(role="tool", name="web_search", tool_call_id="c0", content=render(results)),
+    ]
+    trim = Trim()
+    messages = build_messages("SYS", [], "what is it?", steps, num_ctx=4096, trim=trim)
+    seen = messages[-1].content
+    assert seen != TRIMMED
+    for i in range(1, 6):
+        assert f"[{i}] Title {i} (https://example.com/{i}): zzz" in seen
+    assert (trim.shortened, trim.removed) == (1, 0)
+    assert len("".join(m.content or "" for m in messages)) <= 4096 * 0.7 * 3
+
+
+def test_results_that_do_not_fit_even_shortened_are_dropped_oldest_first():
+    steps = []
+    for i in range(20):
+        steps += [
+            ChatMessage(role="assistant", tool_calls=[ToolCall(id=f"c{i}", name="search_docs")]),
+            ChatMessage(
+                role="tool", name="search_docs", tool_call_id=f"c{i}", content=str(i) * 3000
+            ),
+        ]
+    trim = Trim()
+    messages = build_messages("SYS", [], "q", steps, num_ctx=4096, trim=trim)
+    tools_msgs = [m for m in messages if m.role == "tool"]
+    assert tools_msgs[0].content == TRIMMED and tools_msgs[-1].content.startswith("19")
+    assert trim.removed > 0 and trim.shortened > 0
 
 
 @pytest.mark.parametrize("raw", ['{"query": "x"}', "not json", "[1, 2]"])

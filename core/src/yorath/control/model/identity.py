@@ -107,3 +107,6 @@ class ApiKey(UUIDPk, CreatedAt, Base):
     # model: a user key; agent: calls agent/<name>; agent_self: the model key of the connected
     # agent itself (change connected-agents), issued only on connection
     scope: Mapped[str] = mapped_column(String(20), default="model", server_default="model")
+    # models the key may call (change field-fixes-0-7): None — every chat model of the catalog,
+    # or a list of names where ``local/*`` covers every local chat model
+    models: Mapped[list[str] | None] = mapped_column(JSONB)

@@ -19,11 +19,13 @@ from yorath.control.model import (
     Agent,
     AgentRevision,
     ApiKey,
+    DataClass,
     Deployment,
     Execution,
     ExecutionStatus,
     Instance,
     InstanceStatus,
+    ModelProvider,
     ModelResource,
     ModelServer,
     Node,
@@ -33,6 +35,7 @@ from yorath.control.model import (
 )
 from yorath.control.setup.hardware import HardwareInfo
 from yorath.control.setup.inventory import upsert_node
+from yorath.control.setup.ollama import register_model
 
 pytestmark = pytest.mark.group
 
@@ -421,3 +424,175 @@ async def test_the_bot_check_of_the_agents_node_reaches_the_card(world, session,
     await world.owner.put("/agents/connected/hermes/channel", json={"telegram_token": None})
     r = await world.owner.post("/agents/connected/hermes/telegram/check")
     assert r.status_code == 409 and r.json()["detail"]["code"] == "no_bot"
+
+
+# --- the agent's model in its settings (change field-fixes-0-7) ----------------------------------
+
+
+async def external(session, world) -> None:
+    await register_model(
+        session, "openrouter/default", ModelProvider.OPENROUTER, "openai/x",
+        [DataClass.PUBLIC, DataClass.INTERNAL], context_length=131072,
+    )  # fmt: skip
+    await world.app.state.secrets.put("openrouter_api_key", "sk-or-test")
+
+
+async def test_hermes_gets_the_model_chosen_in_its_settings(world, session, backends):
+    await external(session, world)
+    await world.owner.post("/agents/connected/hermes", json={})
+    before = (await desired(world))["agents"][0]
+    r = await world.owner.put("/agents/hermes/model", json={"model": "openrouter/default"})
+    assert r.status_code == 200, r.text
+    assert r.json()["model"] == "openrouter/default"
+    [item] = (await desired(world))["agents"]
+    assert item["config"]["managed"]["model"]["default"] == "openrouter/default"
+    assert item["config"]["managed"]["model"]["context_length"] == 131072
+    assert item["config_sha"] != before["config_sha"]  # the node recreates the container
+    assert (
+        item["config"]["dotenv"]["YORATH_API_KEY"] == before["config"]["dotenv"]["YORATH_API_KEY"]
+    )
+    bot = world.client(await agent_key(world, "hermes"))
+    r = await bot.post("/v1/chat/completions", json=model_call("openrouter/default"))
+    assert r.status_code == 200, r.text
+    assert len(backends.openrouter) == 1
+    changed = await session.scalar(
+        select(AuditEvent).where(AuditEvent.event_type == AuditEventType.AGENT_MODEL_CHANGED)
+    )
+    assert changed.details == {"agent": "hermes", "before": None, "after": "openrouter/default"}
+    await bot.aclose()
+
+
+async def test_a_model_with_a_small_window_is_refused_for_openclaw(world, session):
+    await register_model(
+        session, "local/gemma4:e2b", ModelProvider.OLLAMA, "gemma4:e2b", list(DataClass),
+        context_length=4096,
+    )  # fmt: skip
+    r = await world.owner.put("/agents/openclaw/model", json={"model": "local/gemma4:e2b"})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "context_too_small"
+    assert "65,536" in r.json()["detail"]["message"] and "4,096" in r.json()["detail"]["message"]
+    agents = {a["name"]: a for a in (await world.owner.get("/agents")).json()}
+    assert agents["openclaw"]["model"] is None
+
+
+async def test_an_own_or_builtin_agent_answers_with_its_chosen_model(world, session, backends):
+    await external(session, world)
+    r = await world.owner.put(
+        "/agents/document-assistant/model", json={"model": "openrouter/default"}
+    )
+    assert r.status_code == 200 and r.json()["model"] == "openrouter/default"
+    models = (await world.owner.get("/chat/models", params={"agent": "document-assistant"})).json()
+    assert [m["name"] for m in models if m["default"]] == ["openrouter/default"]
+    conv = (await world.owner.post("/chat/conversations", json={})).json()
+    events = await ask(world.owner, conv["id"], "How many vacation days?")
+    assert events[-1][1]["status"] == "succeeded"
+    assert len(backends.openrouter) >= 1
+    # back to the default
+    r = await world.owner.put("/agents/document-assistant/model", json={"model": None})
+    assert r.status_code == 200 and r.json()["model"] is None
+    for bad in ("nope", "local/embeddings"):
+        r = await world.owner.put("/agents/document-assistant/model", json={"model": bad})
+        assert r.status_code == 422 and r.json()["detail"]["code"] == "unknown_model"
+
+
+async def test_disable_and_enable_keep_every_attribute_of_the_agent(world, session, backends):
+    """Field-fixes-0-7: the user disabled Hermes and saw the bot fields empty. Disable → Enable
+    (the switch in the list) gives back the bot, its users, the internet switch, the version, the
+    model and the memory; only the key is new."""
+    await external(session, world)
+    body = {"telegram_token": BOT, "telegram_users": ["123"], "version": "v0.20.0"}
+    assert (await world.owner.post("/agents/connected/hermes", json=body)).status_code == 200
+    await world.owner.put("/agents/connected/hermes/network", json={"enabled": False})
+    await world.owner.put("/agents/hermes/model", json={"model": "openrouter/default"})
+    before = next(a for a in (await desired(world))["agents"] if a["agent"] == "hermes")
+    card = next(
+        a for a in (await world.owner.get("/agents/connected")).json() if a["name"] == "hermes"
+    )
+
+    assert (await world.owner.patch("/agents/hermes", json={"enabled": False})).status_code == 200
+    off = next(
+        a for a in (await world.owner.get("/agents/connected")).json() if a["name"] == "hermes"
+    )
+    assert off["telegram"] and off["telegram_users"] == [
+        "123"
+    ]  # the card of a disabled agent shows them
+    assert (await world.owner.patch("/agents/hermes", json={"enabled": True})).status_code == 200
+
+    after = next(a for a in (await desired(world))["agents"] if a["agent"] == "hermes")
+    again = next(
+        a for a in (await world.owner.get("/agents/connected")).json() if a["name"] == "hermes"
+    )
+    for field in ("telegram", "telegram_users", "network_enabled", "version", "node"):
+        assert again[field] == card[field], field
+    assert (
+        after["image"] == before["image"] and after["config"]["dotenv"]["TELEGRAM_BOT_TOKEN"] == BOT
+    )
+    assert after["config"]["dotenv"]["TELEGRAM_ALLOWED_USERS"] == "123"
+    assert after["config"]["managed"]["model"]["default"] == "openrouter/default"
+    assert (
+        after["config"]["dotenv"]["YORATH_API_KEY"] != before["config"]["dotenv"]["YORATH_API_KEY"]
+    )
+    assert (await desired(world))["deny"] == ["172.31.0.11"]  # internet still off
+
+
+async def test_an_own_agent_keeps_its_model_and_key_across_disable(world, session, backends):
+    await external(session, world)
+    await world.owner.put("/agents/document-assistant/model", json={"model": "openrouter/default"})
+    await world.owner.patch("/agents/document-assistant", json={"enabled": False})
+    await world.owner.patch("/agents/document-assistant", json={"enabled": True})
+    agents = {a["name"]: a for a in (await world.owner.get("/agents")).json()}
+    assert agents["document-assistant"]["model"] == "openrouter/default"
+    assert agents["document-assistant"]["revision"]["card"][
+        "tools"
+    ]  # tools are the file's, untouched
+
+
+async def test_restart_recreates_the_agent_with_its_key_and_says_so(world, session, backends):
+    """Field-fixes-0-7: Hermes went silent while restarting; Restart keeps the key and memory, the
+    card says "restarting", and a question meanwhile gets a clear answer."""
+    await world.owner.post("/agents/connected/hermes", json={"telegram_token": BOT})
+    [before] = (await desired(world))["agents"]
+    r = await world.owner.post("/agents/connected/hermes/restart")
+    assert r.status_code == 200 and r.json()["status"] == "restarting"
+    [item] = (await desired(world))["agents"]
+    assert item["restart_nonce"] and item["restart_nonce"] != before.get("restart_nonce", "")
+    assert item["config"] == before["config"] and item["image"] == before["image"]  # same key, bot
+    restarted = await session.scalar(
+        select(AuditEvent).where(AuditEvent.event_type == AuditEventType.AGENT_RESTARTED)
+    )
+    assert restarted.details == {"agent": "hermes"}
+
+    conv = (await world.owner.post("/chat/conversations", json={"agent": "hermes"})).json()
+    events = await ask(world.owner, conv["id"], "hello")
+    assert "restarting, retry in a minute" in json.dumps(events)
+
+    rep = {"instances": [{"deployment_id": item["deployment_id"], "state": "running",
+                          "container_id": "abc"}]}  # fmt: skip
+    assert (await world.node.post("/node/report", json=rep)).status_code == 204
+    row = next(
+        a for a in (await world.owner.get("/agents/connected")).json() if a["name"] == "hermes"
+    )
+    assert row["status"] == "running"
+
+    await world.owner.delete("/agents/connected/hermes")
+    r = await world.owner.post("/agents/connected/hermes/restart")
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "agent_disabled"
+
+
+async def test_an_agent_with_its_own_model_enables_when_the_default_is_small(world, session):
+    """Found on the field server: Hermes on OpenRouter was refused on Enable because the failover
+    had put local/default on a 4,096-token CPU model. The window to check is the agent's model."""
+    await external(session, world)
+    await world.owner.post("/agents/connected/hermes", json={})
+    await world.owner.put("/agents/hermes/model", json={"model": "openrouter/default"})
+    await world.owner.patch("/agents/hermes", json={"enabled": False})
+    await session.execute(
+        update(ModelResource)
+        .where(ModelResource.name == "local/default")
+        .values(context_length=4096)
+    )
+    await session.commit()
+    r = await world.owner.patch("/agents/hermes", json={"enabled": True})
+    assert r.status_code == 200, r.text
+    # an agent on local/default is still refused with the reason
+    r = await world.owner.post("/agents/connected/openclaw", json={})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "context_too_small"

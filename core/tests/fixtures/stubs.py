@@ -56,6 +56,7 @@ class Backends:
         self.openrouter_denied = False
         self.openrouter_models: list[dict[str, Any]] = []
         self.tavily_results = WEB_RESULTS
+        self.tavily_status = 200  # 401 a bad key, 403 the server's address refused, 429 the limit
         # fake GitHub and sandbox-runner
         self.github: list[tuple[str, str, Any]] = []
         self.github_commits: list[str] = ["abc123"]
@@ -130,6 +131,8 @@ class Backends:
             self.tavily.append(
                 {"auth": request.headers.get("authorization"), "body": json.loads(request.content)}
             )
+            if self.tavily_status != 200:
+                return httpx.Response(self.tavily_status, text="<html>Forbidden</html>")
             return httpx.Response(200, json={"results": self.tavily_results})
         self.unexpected.append(f"{request.method} {request.url}")
         return httpx.Response(599, text=f"the stub does not know route {path}")

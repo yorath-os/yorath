@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import Agents from './Agents'
@@ -182,6 +182,8 @@ describe('Connected agents', () => {
       'GET /api/agents/connected': [LIVE],
       'GET /api/journal/egress?hours=24': [],
       'HEAD /yorath-root-ca.crt': () => new Response('', { status: 200 }),
+      'GET /yorath-root-ca.crt': () =>
+        new Response('-----BEGIN CERTIFICATE-----\nAAEC\n-----END CERTIFICATE-----\n', { status: 200 }),
       'POST /api/api-keys': {
         status: 201,
         body: { id: 'k1', name: 'openclaw-api', key: 'yk-agent-key', agent: 'openclaw' },
@@ -193,6 +195,20 @@ describe('Connected agents', () => {
     expect(how).toHaveTextContent(
       'Telegram accepts the bot @yorath_bot and answers 42. Write to it in Telegram.',
     )
+    // the certificate reaches the client machine by a ready command, checked by its fingerprint
+    const cert = await screen.findByLabelText('Get the certificate on your computer')
+    expect(cert).toHaveTextContent(
+      `scp root@${window.location.hostname}:/opt/yorath/installer/yorath-root-ca.crt .`,
+    )
+    expect(cert).toHaveTextContent(
+      `curl -k -o yorath-root-ca.crt ${window.location.origin}/yorath-root-ca.crt`,
+    )
+    expect(cert).toHaveTextContent('openssl x509 -in yorath-root-ca.crt -noout -fingerprint -sha256')
+    expect(
+      await screen.findByText(
+        /AE:4B:32:80:E5:6E:2F:AF:83:F4:14:A6:E3:DA:BE:9D:5F:BE:18:97:65:44:C0:5F:ED:12:1A:CC:B8:5B:53:FC/,
+      ),
+    ).toBeInTheDocument()
     const call = screen.getByLabelText('Call openclaw over the API')
     expect(call).toHaveTextContent('"model": "agent/openclaw"')
     expect(call).toHaveTextContent('Bearer $YORATH_API_KEY')
@@ -293,6 +309,28 @@ describe('Connected agents', () => {
     expect(screen.queryByRole('region', { name: 'How to use' })).not.toBeInTheDocument()
   })
 
+  it('Restart recreates the agent and the card says restarting until it runs', async () => {
+    let restarted = false
+    const api = stubApi({
+      'GET /api/agents': [AGENT],
+      'GET /api/agents/openclaw/executions?limit=20': [],
+      'GET /api/agents/openclaw/source': { status: 404, body: {} },
+      'GET /api/agents/connected': () => ({
+        status: 200,
+        body: [{ ...LIVE, status: restarted ? 'restarting' : 'running' }],
+      }),
+      'GET /api/journal/egress?hours=24': [],
+      'POST /api/agents/connected/openclaw/restart': () => {
+        restarted = true
+        return { status: 200, body: { ...LIVE, status: 'restarting' } }
+      },
+    })
+    render(<Agents selected="openclaw" onSelect={vi.fn()} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Restart' }))
+    expect(api.calls.some((c) => c.key === 'POST /api/agents/connected/openclaw/restart')).toBe(true)
+    expect(await screen.findByText('Restarting')).toBeInTheDocument()
+  })
+
   it('Enable in a cluster asks the node instead of putting the agent on main (#18)', async () => {
     const api = stubApi({
       'GET /api/agents': [{ ...AGENT, enabled: false }],
@@ -319,6 +357,53 @@ describe('Connected agents', () => {
       telegram_token: null,
       telegram_users: [],
     })
+  })
+
+  it('Enable of an agent connected before keeps it as it was, without the form', async () => {
+    const before = {
+      ...CATALOG_ROW,
+      deployed: true,
+      node: 'vm13234',
+      telegram: true,
+      telegram_users: ['123'],
+    }
+    const api = stubApi({
+      'GET /api/agents': [{ ...AGENT, enabled: false }],
+      'GET /api/agents/connected': [before],
+      'GET /api/cluster/nodes': [
+        { name: 'main', role: 'main', status: 'active', cpu_count: 4, ram_gb: 8 },
+        { name: 'vm13234', role: 'worker', status: 'active', cpu_count: 8, ram_gb: 32 },
+      ],
+      'PATCH /api/agents/openclaw': { enabled: true },
+    })
+    render(<Agents onSelect={vi.fn()} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Enable: openclaw' }))
+    await waitFor(() => expect(api.bodyOf('PATCH /api/agents/openclaw')).toEqual({ enabled: true }))
+    expect(screen.queryByRole('region', { name: 'Connect openclaw' })).not.toBeInTheDocument()
+  })
+
+  it('Enable when the agent’s node is gone asks for a node, with its bot users filled in', async () => {
+    const before = {
+      ...CATALOG_ROW,
+      deployed: true,
+      node: 'gone-box',
+      telegram: true,
+      telegram_users: ['123'],
+    }
+    const api = stubApi({
+      'GET /api/agents': [{ ...AGENT, enabled: false }],
+      'GET /api/agents/connected': [before],
+      'GET /api/cluster/nodes': [
+        { name: 'main', role: 'main', status: 'active', cpu_count: 4, ram_gb: 8 },
+        { name: 'vm13234', role: 'worker', status: 'active', cpu_count: 8, ram_gb: 32 },
+      ],
+    })
+    render(<Agents onSelect={vi.fn()} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Enable: openclaw' }))
+    const form = await screen.findByRole('region', { name: 'Connect openclaw' })
+    expect(within(form).getByLabelText('Who to answer in Telegram')).toHaveValue('123')
+    expect(form).toHaveTextContent('The saved bot stays')
+    expect(api.calls.some((c) => c.key.startsWith('PATCH'))).toBe(false)
   })
 
   it('Enable on a single node switches the agent on right away', async () => {

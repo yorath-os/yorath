@@ -67,7 +67,7 @@ function Card({ detail, onClose }: { detail: ExecutionDetail; onClose: () => voi
           {detail.spans.map((s) => (
             <details key={s.span_id}>
               <summary>
-                {s.name} ({s.kind}, {s.status})
+                {s.name} ({s.kind}, {s.status}){trimmed(s.attributes)}
               </summary>
               <pre className="a3-pre">{JSON.stringify(s.attributes, null, 2)}</pre>
             </details>
@@ -75,6 +75,19 @@ function Card({ detail, onClose }: { detail: ExecutionDetail; onClose: () => voi
         </section>
       </div>
     </Window>
+  )
+}
+
+// The agent loop cut tool results to fit the model's window (field-fixes-0-7): the reason a model "found nothing"
+const trimmed = (a: Record<string, unknown>) => {
+  const shortened = Number(a['yorath.loop.tool_results_shortened'] ?? 0)
+  const removed = Number(a['yorath.loop.tool_results_removed'] ?? 0)
+  if (!shortened && !removed) return null
+  return (
+    <span className="a3-text-xs">
+      {' — '}
+      Tool results cut to fit the model’s window: {shortened} shortened, {removed} removed
+    </span>
   )
 }
 

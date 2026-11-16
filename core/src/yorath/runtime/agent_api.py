@@ -94,6 +94,10 @@ async def run_agent(
                     result.citations = [c.model_dump() for c in ev.all_citations]
                     root.attributes["yorath.loop.no_tools"] = ev.no_tools
                     root.attributes["yorath.loop.steps"] = ev.steps
+                    root.attributes["yorath.loop.tool_results_shortened"] = (
+                        ev.tool_results_shortened
+                    )
+                    root.attributes["yorath.loop.tool_results_removed"] = ev.tool_results_removed
                     # the first step with tools is buffered (nudge): send what has not gone out yet
                     if ev.text.startswith(streamed) and len(ev.text) > len(streamed):
                         yield ev.text[len(streamed) :]

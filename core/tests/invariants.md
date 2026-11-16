@@ -93,7 +93,7 @@ What must not break, and why. The identifiers live only here: a test declares co
 | INV-GW-2 | Calls through the HTTP endpoint go through the same checks and journal | One PEP for both control levels |
 | INV-KEY-1 ⭐ | The endpoint accepts only a valid key of an active user; the database holds only the hash, the value is shown once | Decision 32 |
 | INV-API-1 ⭐ | A call through the endpoint leaves no request text, answer or arguments in the trace and the audit | The endpoint does not store content |
-| INV-API-2 | Only the models of the `model-api` card are available through the endpoint; an external model is refused without calling the provider | Local models only by default |
+| INV-API-2 | Only the models of the key are available through the endpoint (every chat model, or the ones ticked; keys issued before 0.8.0 keep the local ones); any other model is refused without calling the provider | Models of a key (field-fixes-0-7) |
 | INV-API-3 | Every endpoint call is a `model-api` Execution on behalf of the key owner, closed in any outcome | Decision 32 |
 | INV-API-4 ⭐ | A key narrowed to an agent calls only that agent on behalf of the key owner: models and other agents are refused without a call | Issue #10 |
 | INV-NET-1 ⭐ | Node traffic went around Yorath (rules removed or changed, the proxy silent): an event in the audit, and the recovery too | Decision 36 |

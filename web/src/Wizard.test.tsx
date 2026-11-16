@@ -139,6 +139,34 @@ describe('Setup wizard', () => {
     expect(alert).not.toHaveTextContent('Key rejected')
   })
 
+  it('a search key saved from a server Tavily refuses says why search won’t work yet', async () => {
+    const warning = "Tavily refused this server's address (403) although the key is valid"
+    world(READY, { 'PUT /api/setup/tavily': { leaves_server: 'The query text leaves the server.', warning } })
+    render(<Wizard onDone={vi.fn()} onOpenData={vi.fn()} />)
+    await screen.findByText('acceptable')
+    await next()
+    await next()
+    await userEvent.type(screen.getByLabelText('Tavily key'), 'tvly-ok-key')
+    await userEvent.click(screen.getByRole('checkbox', { name: /search queries leaves/ }))
+    await next('Save search key')
+    expect(await screen.findByText(warning)).toBeInTheDocument()
+    expect(screen.getByText('The query text leaves the server.')).toBeInTheDocument()
+  })
+
+  it('a rejected search key is named, not shown as JSON', async () => {
+    world(READY, { 'PUT /api/setup/tavily': { status: 422, body: { detail: 'invalid_api_key' } } })
+    render(<Wizard onDone={vi.fn()} onOpenData={vi.fn()} />)
+    await screen.findByText('acceptable')
+    await next()
+    await next()
+    await userEvent.type(screen.getByLabelText('Tavily key'), 'tvly-bad-key')
+    await userEvent.click(screen.getByRole('checkbox', { name: /search queries leaves/ }))
+    await next('Save search key')
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Tavily rejected the key: it is invalid or revoked',
+    )
+  })
+
   it('finishing is recorded and closes the wizard', async () => {
     const onDone = vi.fn()
     const api = world(READY, {

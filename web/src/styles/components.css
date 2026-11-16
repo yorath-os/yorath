@@ -501,6 +501,7 @@ button.a3-chip { cursor: pointer; }
 .a3-apps { display: flex; flex-direction: column; gap: var(--space-2); }
 .a3-apps__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4) var(--space-6); min-block-size: calc(var(--size-control) + var(--space-6)); padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); }
 .a3-apps__row:hover { background: var(--win-fill-strong); }
+.a3-apps__row--open { cursor: pointer; }
 .a3-avatar { flex: 0 0 auto; inline-size: var(--size-avatar); block-size: var(--size-avatar); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-lg); color: var(--on-avatar); font-weight: var(--font-weight-bold); }
 .a3-avatar--1 { background: var(--avatar-1); }
 .a3-avatar--2 { background: var(--avatar-2); }

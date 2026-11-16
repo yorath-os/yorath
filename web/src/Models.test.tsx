@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { stubApi } from '../test/stub-api'
 import Models from './Models'
 
@@ -61,5 +61,30 @@ describe('Models', () => {
     expect(screen.getByText(/Answers agents:/)).toHaveTextContent('local/gemma4:e2b, context window 4,096')
     expect(screen.queryByRole('button', { name: 'Pull the recommended one' })).not.toBeInTheDocument()
     expect(api.calls.some((c) => c.key.startsWith('GET /api/setup/models'))).toBe(false)
+  })
+})
+
+describe('Models: the default switched automatically', () => {
+  it('shows the same warning as the desk', async () => {
+    stubApi({
+      'GET /api/setup/status': STATUS,
+      'GET /api/cluster/models': { status: 404, body: {} },
+      'GET /api/desk/summary': {
+        default_warning: {
+          switched_from: 'local/qwen3.5:9b',
+          switched_to: 'local/gemma4:e2b',
+          node: 'vm13270',
+          at: '',
+          node_back: false,
+          can_return: false,
+          short_window: [],
+          model_unavailable: [],
+        },
+      },
+    })
+    render(<Models onOpenWizard={vi.fn()} />)
+    expect(await screen.findByRole('region', { name: 'Default model' })).toHaveTextContent(
+      'switched automatically from qwen3.5:9b to gemma4:e2b',
+    )
   })
 })

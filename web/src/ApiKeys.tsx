@@ -3,9 +3,12 @@ import {
   createApiKey,
   fetchApiAgents,
   fetchApiKeys,
+  fetchKeyModels,
   revokeApiKey,
+  setKeyModels,
   type ApiKey,
   type ApiKeyCreated,
+  type KeyModel,
 } from './api'
 import { dateTime } from './format'
 import { Button } from './ui/Controls'
@@ -57,10 +60,58 @@ export function CopyBlock({ label, text, where }: { label: string; text: string;
   )
 }
 
+// Which models a key may call (change field-fixes-0-7): every chat model, or the ones ticked
+function ModelsPicker({
+  legend,
+  catalog,
+  value,
+  onChange,
+}: {
+  legend: string
+  catalog: KeyModel[]
+  value: string[] | null
+  onChange: (v: string[] | null) => void
+}) {
+  const ticked = value ?? []
+  return (
+    <fieldset className="a3-stack" aria-label={legend}>
+      <legend className="a3-section-label">{legend}</legend>
+      <label className="a3-check">
+        <input type="radio" checked={value === null} onChange={() => onChange(null)} /> All models
+      </label>
+      <label className="a3-check">
+        <input type="radio" checked={value !== null} onChange={() => onChange(value ?? [])} /> Only these
+        models
+      </label>
+      {catalog.map((m) => (
+        <label key={m.name} className="a3-check">
+          <input
+            type="checkbox"
+            disabled={value === null}
+            checked={value !== null && ticked.includes(m.name)}
+            onChange={(e) =>
+              onChange(e.target.checked ? [...ticked, m.name] : ticked.filter((n) => n !== m.name))
+            }
+          />{' '}
+          <span className="a3-mono">{m.name}</span>, {m.context_length.toLocaleString('en-US')} tokens
+          {m.external ? ' — external: the request leaves the server' : ''}
+        </label>
+      ))}
+    </fieldset>
+  )
+}
+
+const modelsText = (models: string[] | null | undefined) =>
+  !models ? 'all models' : models.map((m) => (m === 'local/*' ? 'local models' : m)).join(', ')
+
 // Model endpoint API keys: your own keys; the owner sees and revokes everyone's keys.
 export default function ApiKeys({ owner }: { owner: boolean }) {
   const [keys, setKeys] = useState<ApiKey[]>([])
   const [agents, setAgents] = useState<string[]>([])
+  const [catalog, setCatalog] = useState<KeyModel[]>([])
+  const [newModels, setNewModels] = useState<string[] | null>(null)
+  const [access, setAccess] = useState('')
+  const [editing, setEditing] = useState<{ key: ApiKey; models: string[] | null } | null>(null)
   const [state, setState] = useState<ScreenState>({ kind: 'loading' })
   const [created, setCreated] = useState<ApiKeyCreated | null>(null)
   const [copied, setCopied] = useState(false)
@@ -69,10 +120,11 @@ export default function ApiKeys({ owner }: { owner: boolean }) {
 
   const reload = useCallback(async () => {
     try {
-      const [r, a] = await Promise.all([fetchApiKeys(), fetchApiAgents()])
+      const [r, a, m] = await Promise.all([fetchApiKeys(), fetchApiAgents(), fetchKeyModels()])
       if (r.status !== 200) throw new Error(`HTTP ${r.status}`)
       setKeys(r.body)
       setAgents(a.status === 200 ? a.body : [])
+      setCatalog(m.status === 200 ? m.body : [])
       setState({ kind: 'ready' })
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
@@ -93,7 +145,11 @@ export default function ApiKeys({ owner }: { owner: boolean }) {
     const data = new FormData(form)
     const name = String(data.get('name') ?? '').trim()
     const agent = String(data.get('access') ?? '') || null
-    const r = await createApiKey(name, agent)
+    if (!agent && newModels !== null && newModels.length === 0) {
+      setError('Tick at least one model, or choose "All models".')
+      return
+    }
+    const r = await createApiKey(name, agent, agent ? null : newModels)
     if (r.status !== 201 || !r.body) {
       setError(`Could not create the key: HTTP ${r.status}`)
       return
@@ -102,6 +158,8 @@ export default function ApiKeys({ owner }: { owner: boolean }) {
     setCopied(false)
     setCreated(r.body)
     form.reset()
+    setNewModels(null)
+    setAccess('')
     await reload()
   }
 
@@ -112,6 +170,18 @@ export default function ApiKeys({ owner }: { owner: boolean }) {
     } catch {
       setError('The browser didn’t allow copying: select the key and copy it manually.')
     }
+  }
+
+  const saveModels = async () => {
+    if (!editing) return
+    if (editing.models !== null && editing.models.length === 0) {
+      setError('Tick at least one model, or choose "All models".')
+      return
+    }
+    const r = await setKeyModels(editing.key.id, editing.models)
+    setError(r.status === 200 ? null : `Could not change the models: HTTP ${r.status}`)
+    if (r.status === 200) setEditing(null)
+    await reload()
   }
 
   const revoke = async (k: ApiKey) => {
@@ -259,6 +329,27 @@ export default function ApiKeys({ owner }: { owner: boolean }) {
                     k.agent ? <span className="a3-mono a3-text-xs">agent {k.agent}</span> : 'model',
                 },
                 {
+                  id: 'models',
+                  header: 'Models',
+                  render: (k) =>
+                    k.agent ? (
+                      '—'
+                    ) : (
+                      <span className="a3-text-xs">
+                        {modelsText(k.models)}{' '}
+                        {!k.revoked_at && (
+                          <Button
+                            size="sm"
+                            aria-label={`Models: ${k.name}`}
+                            onClick={() => setEditing({ key: k, models: k.models ?? null })}
+                          >
+                            Change
+                          </Button>
+                        )}
+                      </span>
+                    ),
+                },
+                {
                   id: 'prefix',
                   header: 'Key',
                   weight: 1.5,
@@ -303,6 +394,25 @@ export default function ApiKeys({ owner }: { owner: boolean }) {
                 },
               ]}
             />
+            {editing && (
+              <Card title={`Models of key "${editing.key.name}"`}>
+                <div className="a3-stack">
+                  <ModelsPicker
+                    legend={`Models of ${editing.key.name}`}
+                    catalog={catalog}
+                    value={editing.models}
+                    onChange={(models) => setEditing({ ...editing, models })}
+                  />
+                  <p className="a3-text-xs">The key stays the same: clients keep working with it.</p>
+                  <div className="a3-agent-actions">
+                    <Button variant="primary" onClick={() => void saveModels()}>
+                      Save models
+                    </Button>
+                    <Button onClick={() => setEditing(null)}>Cancel</Button>
+                  </div>
+                </div>
+              </Card>
+            )}
             <Card title="New key">
               <form className="a3-form" onSubmit={onCreate}>
                 <Field label="Key name" hint={'For example, "laptop" or "Continue"'}>
@@ -324,7 +434,14 @@ export default function ApiKeys({ owner }: { owner: boolean }) {
                   }
                 >
                   {({ id, describedBy }) => (
-                    <select id={id} className="a3-input" name="access" aria-describedby={describedBy}>
+                    <select
+                      id={id}
+                      className="a3-input"
+                      name="access"
+                      aria-describedby={describedBy}
+                      value={access}
+                      onChange={(e) => setAccess(e.target.value)}
+                    >
                       <option value="">model (local/default, Codex, Continue)</option>
                       {agents.map((a) => (
                         <option key={a} value={a}>
@@ -334,6 +451,9 @@ export default function ApiKeys({ owner }: { owner: boolean }) {
                     </select>
                   )}
                 </Field>
+                {!access && catalog.length > 0 && (
+                  <ModelsPicker legend="Models" catalog={catalog} value={newModels} onChange={setNewModels} />
+                )}
                 <div>
                   <Button variant="primary" type="submit">
                     Create key

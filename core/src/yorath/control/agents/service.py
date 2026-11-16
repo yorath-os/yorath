@@ -8,6 +8,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yorath.control.agents.loader import CONNECTED_RUNTIMES, is_builtin_path
+from yorath.control.agents.model_choice import chosen
 from yorath.control.agents.schemas import (
     AgentOut,
     CardOut,
@@ -138,6 +139,7 @@ async def list_agents(session: AsyncSession) -> list[AgentOut]:
     revisions = await latest_revisions(session)
     summaries = await _summaries(session)
     costs = await _costs(session)
+    models = await chosen(session)
     out: list[AgentOut] = []
     for agent in agents:
         runtime = runtimes.get(agent.runtime_type_id, "native")
@@ -168,6 +170,7 @@ async def list_agents(session: AsyncSession) -> list[AgentOut]:
                 else None,
                 executions=summaries.get(agent.id, ExecutionSummary()),
                 cost_usd=costs.get(agent.id, Decimal(0)),
+                model=models.get(agent.name),
             )
         )
     return out

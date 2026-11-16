@@ -11,6 +11,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from yorath.control.journal import AuditEventType, Decision
 from yorath.control.model import DataClass
+from yorath.control.setup import tavily
 from yorath.control.setup.tavily import SECRET_NAME
 from yorath.enforcement.secrets import SecretStoreUnavailable
 from yorath.runtime.tools.registry import EXECUTION_META, ToolDeps
@@ -78,10 +79,17 @@ def build_web_search(deps: ToolDeps) -> MCPServer:
                 json={"query": query, "max_results": MAX_RESULTS},
                 timeout=TIMEOUT_S,
             )
-            r.raise_for_status()
+            answer = tavily.classify(r.status_code)
+            if answer != "ok":
+                why = tavily.REASONS[answer]
+                return ToolResult(content=f"Internet search failed: {why}.", is_error=True)
             results = r.json().get("results") or []
-        except (httpx.HTTPError, ValueError) as exc:
-            return ToolResult(content=f"Internet search failed: {exc}", is_error=True)
+        except httpx.HTTPError:
+            why = tavily.REASONS["unreachable"]
+            return ToolResult(content=f"Internet search failed: {why}.", is_error=True)
+        except ValueError:
+            why = tavily.REASONS["error"]
+            return ToolResult(content=f"Internet search failed: {why}.", is_error=True)
         return ToolResult(
             content=render(results, start) if results else NO_RESULTS,
             data_class=DataClass.PUBLIC,

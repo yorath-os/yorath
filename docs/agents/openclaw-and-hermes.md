@@ -34,8 +34,17 @@ tools (terminal, files in its container) are neither visible to nor restricted b
 - **Telegram**: whether the bot works and whom it answers; the token and user ids go in the fields
   below the block. See [Is the bot working?](#is-the-bot-working) below.
 
+**Model.** By default the agent uses `local/default`; pick another one under "Model" on its card or
+with `yorath agent model hermes openrouter/default`. The model needs a context window of at least
+65,536 tokens.
+
+**Restart.** The "Restart" button or `yorath agent restart hermes`: the container is recreated with the
+same key, bot, version and memory. Until the agent is up again, its card says "Restarting" and a
+question gets "agent is restarting, retry in a minute".
+
 **Disable and remove.** The switch on the agent's card, or `yorath agent remove openclaw`: the agent's
-key is revoked, the container stopped, the memory kept; enabling it again issues a new key.
+key is revoked, the container stopped, the memory kept; enabling it again issues a new key and brings
+back the node, version, model, bot and its users, and the internet switch without asking again.
 `yorath agent remove openclaw --purge` (the "Delete…" button) wipes the agent's memory and secrets too.
 
 **Internet for the agent.** The "Turn off internet" button or `yorath agent internet openclaw off`: the
@@ -59,10 +68,12 @@ Yorath updates leave it alone. If the agent doesn't start on a custom version, t
 servers around it: every node checks its host every few minutes and reports to the main node. They are
 listed under Agents → "Found outside Yorath" with the node and how they run (a host process, as root or
 not; a container; installed but not running). There is no switch: Yorath doesn't start them. "Connect"
-creates an API key for the agent (shown once) and gives the lines for its settings. On a worker node the
+creates an API key for the agent (shown once) and gives the commands for its settings. On a worker node the
 model address goes through the cluster tunnel (`http://10.88.0.1:8000/v1`), so the agent needs neither
-the Yorath certificate nor internet access. Its model calls then show in the journal under the key's
-owner; revoking the key cuts it off. Yorath still doesn't see or limit its tools and internet: for that,
+the Yorath certificate nor internet access; on the main node the commands also make the agent trust the
+Yorath certificate. Once the key exists, the agent moves to "Connected by key" with the key's name and
+its last model call. Its model calls show in the journal under the key's owner; revoking the key cuts it
+off and puts the agent back among those to connect. Yorath still doesn't see or limit its tools and internet: for that,
 connect the agent through Yorath instead (above).
 
 **Telegram.** Each agent has its own bot: Yorath won't let two agents share one token. Change or

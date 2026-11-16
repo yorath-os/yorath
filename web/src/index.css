@@ -118,8 +118,10 @@ body {
   min-block-size: 0;
 }
 @media (min-width: 768px) {
+  /* dvh: in Safari 100vh is taller than the visible page, and the page itself scrolled */
   .a3-os:has(.a3-chat-layout) {
     block-size: 100vh;
+    block-size: 100dvh;
     overflow: hidden;
   }
   .a3-os:has(.a3-chat-layout) .a3-os__body {

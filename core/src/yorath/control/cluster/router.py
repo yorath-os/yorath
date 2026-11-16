@@ -16,7 +16,7 @@ from sqlalchemy import select
 from yorath.control.cluster import placements, service
 from yorath.control.identity.deps import Db, JournalDep, Owner
 from yorath.control.journal.egress import read_report
-from yorath.control.model import Node
+from yorath.control.model import ApiKey, Node
 from yorath.control.setup.hardware import detect
 
 log = logging.getLogger(__name__)
@@ -86,6 +86,11 @@ async def node_action(name: str, action: str, owner: Owner, db: Db, journal: Jou
 # --- model catalog and placements (change model-placements) ---------------------------------
 
 
+class OutsideKey(BaseModel):
+    name: str
+    last_used_at: str | None
+
+
 class OutsideNode(BaseModel):
     """Agents outside Yorath on one node, from its last "yorath scan" (decision 36)."""
 
@@ -99,12 +104,23 @@ class OutsideNode(BaseModel):
     # where an agent on this node reaches the Yorath model: a worker node through the cluster tunnel
     # (no certificate, no internet); None for the main node, whose panel address is the one to use
     model_url: str | None
+    # agents connected with the key Connect issues ("<agent>-<node>"): the key and its last call.
+    # The panel lists them apart from the agents still to connect; a revoked key brings one back.
+    keys: dict[str, OutsideKey] = {}
 
 
 @router.get("/outside-agents")
 async def outside_agents(_: Owner, db: Db, request: Request) -> dict[str, list[OutsideNode]]:
     """Every node's agents outside Yorath: the main node's from its report file, a worker
     node's from the report it sends with its heartbeat (change outside-agents-cluster)."""
+    keys = {
+        k.name: k
+        for k in (
+            await db.scalars(
+                select(ApiKey).where(ApiKey.revoked_at.is_(None)).order_by(ApiKey.created_at)
+            )
+        ).all()
+    }
     out = []
     for node in (
         await db.scalars(
@@ -116,6 +132,17 @@ async def outside_agents(_: Owner, db: Db, request: Request) -> dict[str, list[O
             read_report(request.app.state.settings.host_report_dir) if main else node.host_report
         )
         report = report or {}
+        names = {a.get("agent") for a in report.get("agents", []) + report.get("traces", [])}
+        connected = {
+            agent: OutsideKey(
+                name=k.name,
+                last_used_at=k.last_used_at.isoformat(timespec="seconds")
+                if k.last_used_at
+                else None,
+            )
+            for agent in sorted(n for n in names if isinstance(n, str))
+            if (k := keys.get(f"{agent}-{node.name}")) is not None
+        }
         out.append(
             OutsideNode(
                 node=node.name, main=main, node_status=node.status,
@@ -123,6 +150,7 @@ async def outside_agents(_: Owner, db: Db, request: Request) -> dict[str, list[O
                 agents=report.get("agents", []), traces=report.get("traces", []),
                 truncated=bool(report.get("truncated")),
                 model_url=None if main else f"http://{service.MAIN_IP}:8000/v1",
+                keys=connected,
             )
         )  # fmt: skip
     return {"nodes": out}
@@ -249,6 +277,12 @@ async def default(data: DefaultIn, owner: Owner, db: Db, journal: JournalDep):
     except placements.PlacementError as exc:
         raise _raise(exc) from exc
     return {"name": target.name, "model_id": target.model_id}
+
+
+@router.post("/models/default/dismiss", status_code=204)
+async def dismiss_default_warning(_: Owner, db: Db) -> None:
+    """The owner closed the warning about an automatic switch of the default."""
+    await placements.dismiss_failover(db)
 
 
 class ClassesIn(BaseModel):

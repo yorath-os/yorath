@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from sqlalchemy import Select, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yorath.control.agents.model_choice import chosen
+from yorath.control.cluster.placements import DefaultWarning, default_warning
 from yorath.control.journal.events import Decision
 from yorath.control.journal.models import AuditEvent
 from yorath.control.model import (
@@ -23,6 +25,7 @@ from yorath.control.model import (
     Principal,
 )
 from yorath.db import utcnow
+from yorath.distribution.manifest import Manifest
 
 DESK_TASKS = 5
 ERROR_LOG = 5
@@ -116,6 +119,7 @@ class DeskSummary(BaseModel):
     agent_errors: list[AgentErrors]
     policies: PolicySummary
     error_log: list[ErrorEntry]
+    default_warning: DefaultWarning | None = None  # an automatic switch of the default model
 
 
 def _task_query() -> Select:
@@ -213,7 +217,7 @@ async def _policies(session: AsyncSession, since: datetime) -> PolicySummary:
     )
 
 
-async def desk_summary(session: AsyncSession) -> DeskSummary:
+async def desk_summary(session: AsyncSession, manifest: Manifest | None = None) -> DeskSummary:
     now = utcnow()
     day, hour = now - timedelta(hours=24), now - timedelta(hours=1)
     statuses = await _status_counts(session)
@@ -239,7 +243,9 @@ async def desk_summary(session: AsyncSession) -> DeskSummary:
         )
     )
     tasks = [_task(r) for r in running.all()]
+    warning = await default_warning(session, manifest, await chosen(session)) if manifest else None
     return DeskSummary(
+        default_warning=warning,
         running=statuses[ExecutionStatus.RUNNING],
         queued=statuses[ExecutionStatus.QUEUED],
         errors_hour=sum(1 for t in failed if t.created_at >= hour),

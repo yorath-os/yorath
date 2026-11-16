@@ -51,6 +51,11 @@ class AuditEventType(StrEnum):
     MODEL_REMOVED = "model.removed"
     MODEL_MOVED = "model.moved"  # to a server with another window (pre-public-hardening R2)
     NODE_CLASSES_CHANGED = "node.classes_changed"
+    # change field-fixes-0-7
+    API_KEY_MODELS_CHANGED = "api_key.models_changed"
+    AGENT_MODEL_CHANGED = "agent.model_changed"
+    AGENT_RESTARTED = "agent.restarted"
+    MODEL_DEFAULT_SWITCHED = "model.default_switched"
 
 
 class Decision(StrEnum):

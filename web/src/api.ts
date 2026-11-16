@@ -198,7 +198,7 @@ export const setTavily = (api_key: string, consent: boolean) =>
     body: JSON.stringify({ api_key, consent }),
   }).then(async (r) => ({
     status: r.status,
-    body: (await r.json()) as { leaves_server?: string; detail?: unknown },
+    body: (await r.json()) as { leaves_server?: string; warning?: string | null; detail?: unknown },
   }))
 export const completeSetup = () => post<{ setup_completed: boolean }>('/setup/complete')
 
@@ -418,6 +418,7 @@ export type AgentInfo = {
   control_level: 'tool' | 'sandbox' | 'gateway'
   owner: PrincipalRef | null
   service_account: PrincipalRef | null
+  model?: string | null // chosen in the agent's settings; null: the md file's model
   revision: {
     id: string
     revision_no: number
@@ -484,6 +485,16 @@ export const setAgentEnabled = (name: string, enabled: boolean) =>
   }).then(async (r) => ({
     status: r.status,
     // a refusal carries {detail: {code, message}}: the reason must reach the screen
+    body: r.ok ? null : ((await r.json().catch(() => null)) as ConnectedError | null),
+  }))
+// The model an agent uses, chosen in its settings (change field-fixes-0-7); null: its md file's model
+export const setAgentModel = (name: string, model: string | null) =>
+  fetch(`/api/agents/${encodeURIComponent(name)}/model`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
+  }).then(async (r) => ({
+    status: r.status,
     body: r.ok ? null : ((await r.json().catch(() => null)) as ConnectedError | null),
   }))
 export const fetchAgentExecutions = (name: string, limit = 20) =>
@@ -627,7 +638,21 @@ export type DeskSummary = {
   agent_errors: { agent: string; total: number; by_status: Record<string, number> }[]
   policies: { allowed: number; denied: number; reasons: { reason: string; count: number }[] }
   error_log: { id: string; at: string; status: string; agent: string; message: string | null }[]
+  default_warning?: DefaultWarning | null
 }
+// An automatic switch of the default model (change field-fixes-0-7)
+export type DefaultWarning = {
+  switched_from: string
+  switched_to: string | null // null: no model was up, the default stayed
+  node: string | null
+  at: string
+  node_back: boolean
+  can_return: boolean
+  short_window: string[]
+  model_unavailable: string[]
+}
+export const dismissDefaultWarning = () =>
+  fetch('/api/cluster/models/default/dismiss', { method: 'POST' }).then((r) => ({ status: r.status }))
 export const fetchDeskSummary = () => get<DeskSummary>('/desk/summary')
 
 // Model endpoint API keys (change model-endpoint): the value arrives once — in the create response
@@ -641,11 +666,20 @@ export type ApiKey = {
   last_used_at: string | null
   revoked_at: string | null
   agent: string | null // key narrowed to an agent: calls only agent/<name>
+  models?: string[] | null // null: every chat model; else these names (local/* — every local one)
 }
 export type ApiKeyCreated = ApiKey & { key: string }
+export type KeyModel = { name: string; context_length: number; external: boolean }
 export const fetchApiKeys = () => get<ApiKey[]>('/api-keys')
-export const createApiKey = (name: string, agent: string | null = null) =>
-  post<ApiKeyCreated>('/api-keys', agent ? { name, agent } : { name })
+export const fetchKeyModels = () => get<KeyModel[]>('/api-keys/models')
+export const createApiKey = (name: string, agent: string | null = null, models: string[] | null = null) =>
+  post<ApiKeyCreated>('/api-keys', { name, ...(agent ? { agent } : {}), ...(models ? { models } : {}) })
+export const setKeyModels = (id: string, models: string[] | null) =>
+  fetch(`/api/api-keys/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ models }),
+  }).then(async (r) => ({ status: r.status, body: (await r.json()) as ApiKey }))
 export const fetchApiAgents = () => get<string[]>('/api-keys/agents')
 export const revokeApiKey = (id: string) => fetch(`/api/api-keys/${id}`, { method: 'DELETE' })
 
@@ -666,8 +700,9 @@ export type ConnectedAgent = {
   telegram_users: string[]
   /** the bot as the agent's node sees it (change telegram-check); null until the first check */
   telegram_check?: TelegramCheck | null
-  status: 'starting' | 'running' | 'stopped' | 'failed' | 'lost' | null
+  status: 'starting' | 'restarting' | 'running' | 'stopped' | 'failed' | 'lost' | null
   node: string | null
+  deployed?: boolean // connected before and not removed: enabling it again needs no form
   status_detail: string | null
   running_version: string | null
   running_digest: string | null
@@ -707,6 +742,8 @@ export const setAgentChannel = (name: string, telegram_token: string | null, tel
   })
 export const checkAgentTelegram = (name: string) =>
   post<ConnectedAgent & ConnectedError>(`/agents/connected/${enc(name)}/telegram/check`, {})
+export const restartAgent = (name: string) =>
+  post<ConnectedAgent & ConnectedError>(`/agents/connected/${enc(name)}/restart`, {})
 export const setAgentVersion = (name: string, version: string | null) =>
   put<ConnectedAgent & ConnectedError>(`/agents/connected/${enc(name)}/version`, { version })
 
@@ -751,6 +788,8 @@ export type OutsideNode = {
   traces: { agent: string; path: string }[]
   truncated?: boolean // the scan found more than a report carries
   model_url: string | null // a worker node: the model through the cluster tunnel
+  // agents connected with the key Connect issued ("<agent>-<node>"); a revoked key is not here
+  keys?: Record<string, { name: string; last_used_at: string | null }>
 }
 export const fetchOutsideAgents = () => get<{ nodes: OutsideNode[] }>('/cluster/outside-agents')
 export type JoinToken = { token: string; expires_at: string; command: string }

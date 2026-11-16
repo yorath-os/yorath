@@ -125,7 +125,7 @@ function useDeskSummary(enabled: boolean) {
     const t = setInterval(() => void load(), POLL_MS)
     return () => clearInterval(t)
   }, [enabled, load])
-  return { summary, state }
+  return { summary, state, reload: load }
 }
 
 // The shell after sign-in: menu by role, sections on the hash, the wizard for an owner with an unfinished setup.
@@ -163,6 +163,7 @@ export default function Shell({ me, onLogout }: { me: Me; onLogout: () => Promis
         state={desk.state}
         onOpenTasks={() => navigate('agents-tasks')}
         onOpenTask={(id) => navigate(`agents-tasks/${id}`)}
+        onChanged={() => void desk.reload()}
       />
     ),
     chat: <Chat />,

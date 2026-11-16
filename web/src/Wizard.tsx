@@ -90,6 +90,7 @@ export default function Wizard({ onDone, onOpenData }: { onDone: () => void; onO
   const [progress, setProgress] = useState<Record<string, Progress>>({})
   const [error, setError] = useState<string | null>(null)
   const [tavilyNote, setTavilyNote] = useState<string | null>(null)
+  const [tavilyWarning, setTavilyWarning] = useState<string | null>(null)
   const [tavilyError, setTavilyError] = useState<string | null>(null)
   const [keyError, setKeyError] = useState<string | null>(null)
   const [leaves, setLeaves] = useState<string | null>(null)
@@ -157,11 +158,16 @@ export default function Wizard({ onDone, onOpenData }: { onDone: () => void; onO
     const r = await setTavily(String(f.get('tavily_key') ?? ''), f.get('tavily_consent') === 'on')
     if (r.status >= 400) {
       setTavilyNote(null)
-      setTavilyError(`Key rejected: ${JSON.stringify(r.body.detail)}`)
+      setTavilyError(
+        r.body.detail === 'invalid_api_key'
+          ? 'Tavily rejected the key: it is invalid or revoked.'
+          : `Key rejected: ${JSON.stringify(r.body.detail)}`,
+      )
       return
     }
     setTavilyError(null)
     setTavilyNote(r.body.leaves_server ?? null)
+    setTavilyWarning(r.body.warning ?? null)
     form.reset()
     await reload()
   }
@@ -183,6 +189,9 @@ export default function Wizard({ onDone, onOpenData }: { onDone: () => void; onO
         r.body.leaves_server,
         r.body.warnings?.includes('pricing_unavailable')
           ? 'Could not get the model prices: the cost of external calls won’t be counted.'
+          : null,
+        r.body.warnings?.includes('window_unavailable')
+          ? 'Could not get the model’s context window from OpenRouter: 32,768 tokens are assumed.'
           : null,
       ]
         .filter(Boolean)
@@ -321,6 +330,7 @@ export default function Wizard({ onDone, onOpenData }: { onDone: () => void; onO
                   <Button type="submit">Save search key</Button>
                 </div>
                 {tavilyError && <Failure>{tavilyError}</Failure>}
+                {tavilyWarning && <Notice tone="warn">{tavilyWarning}</Notice>}
                 {tavilyNote && <Notice tone="info">{tavilyNote}</Notice>}
               </form>
             </Card>

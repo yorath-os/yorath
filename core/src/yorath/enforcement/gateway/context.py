@@ -15,6 +15,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yorath.control.agents.loader import AgentCard, parse_agent_file
+from yorath.control.agents.model_choice import agent_model, with_model
 from yorath.control.journal import AuditEventType, ControlLevel, Journal
 from yorath.control.model import (
     Agent,
@@ -126,7 +127,9 @@ async def load_agent(
     if not path.is_file():
         raise GatewayError("agent_file_missing", f"agent file {rev.path} not found")
     parsed = parse_agent_file(path)
-    return agent, rev, parsed.card, parsed.body.strip()
+    # the model chosen in the agent's settings (field-fixes-0-7) replaces the md file's default
+    card = with_model(parsed.card, await agent_model(session, name))
+    return agent, rev, card, parsed.body.strip()
 
 
 async def open_context(

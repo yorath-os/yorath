@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { stubApi } from '../test/stub-api'
-import { checkedText } from './format'
+import { checkedText, lastCallText } from './format'
 import { OutsideAgents } from './OutsideAgents'
 
 // Agents outside Yorath on every node (change outside-agents-cluster): listed, and connected to the
@@ -60,9 +60,67 @@ describe('OutsideAgents', () => {
     expect(api.bodyOf('POST /api/api-keys')).toEqual({ name: 'openclaw-vm13234' })
     expect(await screen.findByText('yorath_key_SECRET')).toBeInTheDocument()
     const config = screen.getByLabelText('OpenClaw settings')
-    expect(config).toHaveTextContent('"baseUrl": "http://10.88.0.1:8000/v1"')
-    expect(config).toHaveTextContent('"primary": "yorath/local/default"')
+    expect(config).toHaveTextContent('export YORATH_API_KEY=yorath_key_SECRET')
+    expect(config).toHaveTextContent(
+      `openclaw config set models.providers.yorath '{"baseUrl":"http://10.88.0.1:8000/v1",`,
+    )
+    expect(config).toHaveTextContent('openclaw config set agents.defaults.model.primary yorath/local/default')
+    expect(config).not.toHaveTextContent('NODE_EXTRA_CA_CERTS') // the tunnel needs no certificate
     expect(screen.getByText(/revoke the key in API keys/)).toBeInTheDocument()
+  })
+
+  it('on the main node the OpenClaw lines go to the panel address and trust the Yorath certificate', async () => {
+    const real = window.location
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { origin: 'https://203.0.113.5' },
+    })
+    try {
+      const main = { ...NODES.nodes[1], node: 'main', main: true, model_url: null }
+      stubApi({
+        'GET /api/cluster/outside-agents': { nodes: [main] },
+        'POST /api/api-keys': { status: 201, body: KEY },
+      })
+      render(<OutsideAgents />)
+      await userEvent.click(await screen.findByRole('button', { name: 'Connect openclaw on main' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Create a key' }))
+      const config = await screen.findByLabelText('OpenClaw settings')
+      expect(config).toHaveTextContent('"baseUrl":"https://203.0.113.5/v1"')
+      expect(config).toHaveTextContent('export NODE_EXTRA_CA_CERTS=/opt/yorath/installer/yorath-root-ca.crt')
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: real })
+    }
+  })
+
+  it('an agent connected by its key leaves the list to connect and shows its key and last call', async () => {
+    const hermes = { agent: 'hermes', where: 'container', container: 'hermes-1' }
+    const node = {
+      ...NODES.nodes[1],
+      agents: [...NODES.nodes[1].agents, hermes],
+      keys: { openclaw: { name: 'openclaw-vm13234', last_used_at: null } },
+    }
+    stubApi({ 'GET /api/cluster/outside-agents': { nodes: [node] } })
+    render(<OutsideAgents />)
+    const connected = await screen.findByRole('table', { name: 'Connected by key' })
+    const crow = within(connected).getAllByRole('row').slice(1)
+    expect(crow).toHaveLength(1)
+    expect(within(crow[0]).getByText('openclaw')).toBeInTheDocument()
+    expect(within(crow[0]).getByText('openclaw-vm13234')).toBeInTheDocument()
+    expect(within(crow[0]).getByText('no calls yet')).toBeInTheDocument()
+    expect(within(connected).queryByRole('button')).not.toBeInTheDocument()
+    const found = screen.getByRole('table', { name: 'Found outside Yorath' })
+    const frow = within(found).getAllByRole('row').slice(1)
+    expect(frow).toHaveLength(1) // anchor: hermes, without a key, is still to connect
+    expect(within(frow[0]).getByText('hermes')).toBeInTheDocument()
+    expect(within(found).queryByText('openclaw')).not.toBeInTheDocument()
+  })
+
+  it('says when the last model call of a connected agent was', () => {
+    const now = Date.parse('2026-11-16T12:00:00+00:00')
+    expect(lastCallText(null, now)).toBe('no calls yet')
+    expect(lastCallText('2026-11-16T11:58:00+00:00', now)).toBe('2 min ago')
+    expect(lastCallText('2026-11-16T07:00:00+00:00', now)).toBe('5 h ago')
+    expect(lastCallText('2026-11-13T12:00:00+00:00', now)).toBe('3 d ago')
   })
 
   it('says nothing when no node found an agent', async () => {

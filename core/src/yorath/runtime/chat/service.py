@@ -218,6 +218,12 @@ async def answer(
                         citations = [c.model_dump() for c in ev.all_citations]
                         root.attributes["yorath.loop.no_tools"] = ev.no_tools
                         root.attributes["yorath.loop.steps"] = ev.steps
+                        root.attributes["yorath.loop.tool_results_shortened"] = (
+                            ev.tool_results_shortened
+                        )
+                        root.attributes["yorath.loop.tool_results_removed"] = (
+                            ev.tool_results_removed
+                        )
                     elif isinstance(ev, Failure):
                         final, error = ev.status, ev.message
                         code = "model_denied" if ev.status is ExecutionStatus.DENIED else ev.code

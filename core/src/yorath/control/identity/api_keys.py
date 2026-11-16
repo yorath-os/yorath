@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from yorath.control.identity.deps import CurrentUser, Db, JournalDep
 from yorath.control.journal import AuditEventType, Journal
-from yorath.control.model import Agent, AgentRevision, ApiKey, User
+from yorath.control.model import Agent, AgentRevision, ApiKey, ModelProvider, ModelResource, User
 from yorath.db import utcnow
 
 KEY_PREFIX = "yorath_key_"
@@ -70,6 +70,19 @@ async def api_agent(
     return agent
 
 
+async def key_models(session: AsyncSession, key: ApiKey, card_models: list[str]) -> list[str]:
+    """Models a key may call: its own list, or — for a key with every model — the endpoint card's
+    local models plus the external models connected with the owner's consent."""
+    if key.models is not None:
+        return list(key.models)
+    external = await session.scalars(
+        select(ModelResource.name).where(
+            ModelResource.enabled.is_(True), ModelResource.provider != ModelProvider.OLLAMA
+        )
+    )
+    return [*card_models, *[n for n in external.all() if n not in card_models]]
+
+
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -103,6 +116,7 @@ async def issue_api_key(
     name: str,
     agent: Agent | None = None,
     scope: str | None = None,
+    models: list[str] | None = None,
 ) -> tuple[ApiKey, str]:
     """Default ``scope``: ``agent`` with an agent, ``model`` without; ``agent_self`` is only for
     connecting an agent (change connected-agents)."""
@@ -114,6 +128,7 @@ async def issue_api_key(
         token_hash=_hash(token),
         agent_id=agent.id if agent else None,
         scope=scope or ("agent" if agent else "model"),
+        models=models,
     )
     session.add(key)
     await session.commit()
@@ -170,6 +185,13 @@ class ApiKeyIn(BaseModel):
     agent: str | None = Field(
         default=None, max_length=100, description="agent with the api trigger"
     )
+    models: list[str] | None = Field(
+        default=None, max_length=100, description="None: every chat model; else these names"
+    )
+
+
+class ApiKeyModelsIn(BaseModel):
+    models: list[str] | None = Field(max_length=100)
 
 
 class ApiKeyOut(BaseModel):
@@ -182,6 +204,7 @@ class ApiKeyOut(BaseModel):
     last_used_at: datetime | None
     revoked_at: datetime | None
     agent: str | None = None
+    models: list[str] | None = None
 
 
 class ApiKeyCreated(ApiKeyOut):
@@ -199,6 +222,7 @@ def _out(key: ApiKey, login: str, agent: str | None = None) -> dict:
         "last_used_at": key.last_used_at,
         "revoked_at": key.revoked_at,
         "agent": agent,
+        "models": key.models,
     }
 
 
@@ -234,6 +258,27 @@ async def callable_agents(_: CurrentUser, db: Db) -> list[str]:
     ]
 
 
+class KeyModelOut(BaseModel):
+    name: str
+    context_length: int
+    external: bool
+
+
+@router.get("/models", response_model=list[KeyModelOut])
+async def key_model_choices(_: CurrentUser, db: Db) -> list[dict]:
+    """Chat models a key can be given: local ones and external ones connected with consent."""
+    rows = await db.scalars(
+        select(ModelResource)
+        .where(ModelResource.enabled.is_(True), ModelResource.name != "local/embeddings")
+        .order_by(ModelResource.name)
+    )
+    return [
+        {"name": m.name, "context_length": m.context_length,
+         "external": m.provider != ModelProvider.OLLAMA}
+        for m in rows.all()
+    ]  # fmt: skip
+
+
 @router.post("", response_model=ApiKeyCreated, status_code=201)
 async def create_key(data: ApiKeyIn, user: CurrentUser, db: Db, journal: JournalDep) -> dict:
     agent = None
@@ -242,8 +287,56 @@ async def create_key(data: ApiKeyIn, user: CurrentUser, db: Db, journal: Journal
             agent = await api_agent(db, name=data.agent)
         except AgentNotCallable as exc:
             raise HTTPException(422, detail={"code": exc.code, "message": str(exc)}) from exc
-    key, token = await issue_api_key(db, journal, user, data.name.strip(), agent)
+    models = await _checked_models(db, data.models)
+    key, token = await issue_api_key(db, journal, user, data.name.strip(), agent, models=models)
     return {**_out(key, user.login, agent.name if agent else None), "key": token}
+
+
+async def _checked_models(db: AsyncSession, names: list[str] | None) -> list[str] | None:
+    """Names of chat models of the catalog (or ``local/*``); anything else is refused."""
+    if names is None:
+        return None
+    known = set(
+        (await db.scalars(select(ModelResource.name).where(ModelResource.enabled.is_(True)))).all()
+    ) - {"local/embeddings"}
+    unknown = [n for n in names if n != "local/*" and n not in known]
+    if unknown:
+        raise HTTPException(
+            422, detail={"code": "unknown_model", "message": f"no such model: {', '.join(unknown)}"}
+        )
+    if not names:
+        raise HTTPException(422, detail={"code": "no_models", "message": "pick at least one model"})
+    return list(dict.fromkeys(names))
+
+
+@router.patch("/{key_id}", response_model=ApiKeyOut)
+async def set_key_models(
+    key_id: uuid.UUID, data: ApiKeyModelsIn, user: CurrentUser, db: Db, journal: JournalDep
+) -> dict:
+    """Which models a key may call; the key itself stays (same value, same prefix)."""
+    key = await db.get(ApiKey, key_id)
+    if (
+        key is None
+        or key.revoked_at is not None
+        or (user.role != "owner" and key.user_id != user.id)
+    ):
+        raise HTTPException(404, detail="api_key_not_found")
+    if key.scope != "model":
+        raise HTTPException(
+            409,
+            detail={"code": "not_a_model_key", "message": "this key calls an agent, not models"},
+        )
+    before = key.models
+    key.models = await _checked_models(db, data.models)
+    await db.commit()
+    await journal.audit(
+        AuditEventType.API_KEY_MODELS_CHANGED,
+        actor_principal_id=user.id,
+        details={"key_id": str(key.id), "name": key.name, "prefix": key.prefix,
+                 "before": before, "after": key.models},
+    )  # fmt: skip
+    login = await db.scalar(select(User.login).where(User.id == key.user_id))
+    return _out(key, login or "")
 
 
 @router.delete("/{key_id}", status_code=204)
