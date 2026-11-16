@@ -1,0 +1,35 @@
+name: Bug report
+description: Something doesn't work in a running Yorath.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The first line of `yorath status`.
+      placeholder: "version: 0.6.0 (v0.6.0)"
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output or screenshot
+      description: The last lines of the terminal output, or paste a screenshot of the browser.
+      render: text
+  - type: textarea
+    id: diag
+    attributes:
+      label: Diagnostics archive
+      description: Run `yorath diag` on the server and attach the archive it prints (keys and passwords are redacted; review it first).
+  - type: input
+    id: page
+    attributes:
+      label: Documentation page
+      description: If this is about the docs, the address of the page.

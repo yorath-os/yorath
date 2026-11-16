@@ -1,0 +1,4 @@
+dist
+node_modules
+# A3 design handoff files stay verbatim so new versions can be diffed
+src/styles/

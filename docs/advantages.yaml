@@ -1,0 +1,74 @@
+# Product advantages: one source for the home page blocks Run, Connect, Control, Scale and for the
+# README section "What you get" (decision 45; README is checked against this file, decision 46).
+# Only what is in the released version (0.6.0) goes into the
+# four blocks; group 5 is for the Enterprise page.
+#
+# Lines marked "REVIEW:" are places where the translation or the claim needs the user's eye.
+
+blocks:
+  - key: run
+    principle: Plug & Play
+    group: 4                      # "Minimum DevOps — maximum value for the business"
+    title: Minimum DevOps. Maximum value for the business.
+    line: AI without infrastructure complexity.
+    items:
+      - Yorath detects your hardware and picks the best model for it.
+      - It downloads the model, runs it and keeps it working.
+      - One space for your agents and one for your infrastructure.
+      # 4.7 "minimize support cost" is left out until there is a number or an example (§4).
+    link: { text: How installation works, href: /docs/get-started/installation/ }
+
+  - key: connect
+    principle: Connect Everything
+    group: 3                      # "Managing internal and external agents"
+    title: Manage your own and third-party agents.
+    line: Every agent. Every model. Every machine.
+    items:
+      - Install agents with Yorath.
+      - Install agents yourself — Yorath detects them and shows them to you.   # edit 3
+      - You know about every agent on all your servers.                          # edit 4
+      - Works with popular agents — OpenClaw and Hermes.
+      # REVIEW: OpenClaw and Hermes need a GPU; the site says so on /agents, not in this line.
+    link: { text: Agents that work out of the box, href: /agents/ }
+
+  - key: control
+    principle: Govern Centrally
+    group: 2                      # "System-level control of access to sensitive data"
+    title: Access to sensitive data is controlled by the system, not by the prompt.
+    line: One control plane. Your rules.
+    items:
+      - An agent gets no access to sensitive data if its access level is not high enough.
+      - Built-in agents can't send sensitive data out — Yorath closes the way out automatically. A connected agent's internet is cut with one switch.   # edit 2
+      - Servers are split by trust level. Requests to models on your company's own servers and on rented cloud servers are kept apart — for example, confidential requests stay inside your organization, the rest can go anywhere. The control is built into the core.
+      - Control of agents' internet access.
+    link: { text: How enforcement works, href: /security/ }
+    link2: { text: Read the white paper, href: /whitepaper/ }
+
+  - key: scale
+    principle: Scale Seamlessly
+    group: 1                      # "A cluster of several servers with several GPUs, plug and play"
+    title: A cluster of servers with GPUs — plug and play.
+    line: Add resources. Grow without rebuilding.
+    items:
+      - New servers join by token — enter it, Yorath does the rest.         # 1.1 + 4.3
+      - Manage every node from one place.
+      - One endpoint for clients and agents — they don't need to know how many GPUs are behind it.   # 1.3 + 4.4
+      - An automatic request queue.
+      - Several models at once — a client picks the default or a specific one (qwen, deepseek).
+      # REVIEW: "deepseek" is the user's example; no DeepSeek model has been measured on Yorath yet.
+      - Mixed servers in one cluster — for example, a server without a GPU, a server with 1 GPU and a server with 1 GPU.   # edit 1: 3 units, the Community limit
+    example_units: [1, 1, 1]      # the cluster example in units (Community limit 3)
+    link: { text: Add a server, href: /docs/cluster/add-a-server/ }
+    link2: { text: "Need more than three nodes? Enterprise", href: /enterprise/ }
+
+enterprise:
+  group: 5                        # "Ready for enterprise tasks"
+  title: Ready for enterprise work.
+  available:                      # in Community today, within one cluster
+    - Separate permissions for every agent.
+    - Many users with their own roles.
+    - All audit in one place.
+    - All control in one place.
+    - All agents in one place.
+  in_development:                 # edit 5: federation only here, marked
+    - Several clusters under one control — federation.

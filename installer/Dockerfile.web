@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1.7
+ARG NODE_IMAGE=node:24-alpine
+ARG CADDY_IMAGE=caddy:2.11.7-alpine
+FROM ${NODE_IMAGE} AS build
+WORKDIR /app
+COPY web/package.json web/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+COPY web/ ./
+RUN npm run build
+
+FROM ${CADDY_IMAGE} AS prod
+COPY installer/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/dist /srv
+EXPOSE 80 443

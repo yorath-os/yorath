@@ -1,0 +1,77 @@
+# Cluster worker node (change cluster-nodes, decision 35): no database, core or panel.
+# The link to the main node is only the WireGuard tunnel yorath-wg (10.88.0.0/24), no inbound ports from the internet.
+# Installed by `install.sh --join <main node> <token>`; the node address in the tunnel is YORATH_NODE_OVERLAY_IP.
+name: yorath
+
+services:
+  # node proxy: the same as on the main node (change node-egress)
+  egress:
+    image: yorath-egress:${YORATH_VERSION}
+    build:
+      context: ..
+      dockerfile: installer/Dockerfile.egress
+      args:
+        YORATH_IMAGE_UBUNTU: ${YORATH_IMAGE_UBUNTU:-ubuntu:24.04}
+        YORATH_SQUID_VERSION: ${YORATH_SQUID_VERSION:-6.14}
+    network_mode: host
+    volumes:
+      - ./egress/squid.conf:/etc/squid/squid.conf:ro
+      - egress-state:/var/lib/yorath-egress
+      - egress-node-logs:/var/log/yorath-egress
+    restart: always
+
+  # node service: desired state comes from the main node core through the tunnel, with this node's token
+  node-agent:
+    image: ${YORATH_IMAGE_CORE:-yorath-core:${YORATH_VERSION}}
+    build:
+      context: ..
+      dockerfile: installer/Dockerfile.core
+      args:
+        PYTHON_IMAGE: ${YORATH_IMAGE_PYTHON}
+    command: ["yorath", "node-agent"]
+    environment:
+      YORATH_NODE_TOKEN: ${YORATH_NODE_TOKEN:-}
+      YORATH_NODE_CORE_URL: ${YORATH_NODE_CORE_URL:-http://10.88.0.1:8000}
+      YORATH_NODE_SHIP_EGRESS: "true"  # node proxy journal goes to the main node
+      # the node's cards: the main node keeps one model server per card (installer/node-models.sh)
+      YORATH_NODE_GPU_COUNT: ${YORATH_NODE_GPU_COUNT:-0}
+      YORATH_NODE_GPU_NAME: ${YORATH_NODE_GPU_NAME:-}
+      YORATH_NODE_GPU_VRAM_GB: ${YORATH_NODE_GPU_VRAM_GB:-}
+      YORATH_NODE_MODEL: ${YORATH_NODE_MODEL:-off}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - egress-state:/var/lib/yorath-egress
+      - egress-node-logs:/var/log/yorath-egress:ro
+      - ./.host-report:/host-report:ro  # agents outside Yorath found by yorath scan (decision 36)
+    restart: unless-stopped
+
+  # node gateway: the only way into the node, from the tunnel and only from the main node (Caddyfile.node)
+  node-gateway:
+    image: ${YORATH_IMAGE_CADDY}
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    volumes:
+      - ./Caddyfile.node:/etc/caddy/Caddyfile:ro
+    environment:
+      YORATH_MAIN_IP: ${YORATH_MAIN_OVERLAY_IP:-10.88.0.1}
+    ports:
+      - "${YORATH_NODE_OVERLAY_IP:-127.0.0.1}:8090:8090"
+    networks:
+      default:
+      # for node agents this is the core: core:8000 leads to the main node Gateway through the tunnel
+      agents:
+        aliases: [core]
+    restart: unless-stopped
+
+  # model servers (one Ollama per GPU) are in the generated installer/compose.models.yaml
+  # (installer/node-models.sh, change model-placements)
+
+networks:
+  agents:
+    name: yorath_agents
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+
+volumes:
+  egress-state:
+  egress-node-logs:

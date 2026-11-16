@@ -1,0 +1,12 @@
+# Local node proxy (change node-egress, decision 36): Squid with OpenSSL intercepts HTTPS without
+# decryption (SNI). ubuntu/squid is built without OpenSSL and will not do.
+ARG YORATH_IMAGE_UBUNTU=ubuntu:24.04
+FROM ${YORATH_IMAGE_UBUNTU}
+ARG YORATH_SQUID_VERSION=6.14
+RUN apt-get update -qq \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends squid-openssl openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && squid -v | head -1 | grep -q "Version ${YORATH_SQUID_VERSION}" \
+ || { echo "expected Squid ${YORATH_SQUID_VERSION}: $(squid -v | head -1)"; exit 1; }
+COPY installer/egress/entrypoint.sh /usr/local/bin/yorath-egress
+ENTRYPOINT ["/usr/local/bin/yorath-egress"]

@@ -1,0 +1,74 @@
+name: ci
+
+# CI of the public repository: the same checks as before every release.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: old product name does not come back
+        run: make check-name
+      - name: product files are in English
+        run: make check-lang
+      - name: install script (version, stream run, root check)
+        run: make test-installer
+
+  core:
+    runs-on: ubuntu-24.04
+    env:
+      YORATH_DATABASE_URL: postgresql+asyncpg://yorath:yorath@localhost:5432/yorath
+    services:
+      db:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: yorath
+          POSTGRES_PASSWORD: yorath
+          POSTGRES_DB: yorath
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U yorath -d yorath" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: core/uv.lock
+      - name: lint
+        working-directory: core
+        run: |
+          uv sync --frozen
+          uv run ruff format --check .
+          uv run ruff check .
+          uv run mypy src
+      - name: manifest
+        working-directory: core
+        run: uv run yorath check-manifest
+      - name: README matches its sources
+        run: make check-readme test-scripts
+      - name: tests (unit + integration on Postgres)
+        working-directory: core
+        run: uv run pytest -q
+
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: |
+          npm ci
+          npm run lint
+          npm run format:check
+          npm test

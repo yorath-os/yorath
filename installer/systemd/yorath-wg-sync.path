@@ -1,0 +1,8 @@
+[Unit]
+Description=Yorath: cluster tunnel peers changed (change cluster-nodes)
+
+[Path]
+PathChanged=@YORATH_DIR@/installer/.cluster/peers.conf
+
+[Install]
+WantedBy=multi-user.target

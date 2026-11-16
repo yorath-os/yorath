@@ -1,0 +1,40 @@
+# Yorath entry point (change model-endpoint): panel static files, /api → core, /v1 → model endpoint.
+# render-env.py picks the TLS mode from .env.local (YORATH_DOMAIN, YORATH_TLS_CERT, YORATH_HOSTNAME,
+# YORATH_TLS=off) and passes the site address and the tls directive here via environment variables.
+{
+	{$YORATH_CADDY_EMAIL}
+	{$YORATH_CADDY_SNI}
+}
+
+{$YORATH_SITE::80} {
+	{$YORATH_TLS_DIRECTIVE}
+
+	# chat and endpoint SSE: flush_interval -1 sends chunks to the client immediately, unbuffered
+	handle_path /api/* {
+		reverse_proxy core:8000 {
+			flush_interval -1
+		}
+	}
+
+	handle /v1/* {
+		reverse_proxy core:8000 {
+			flush_interval -1
+		}
+	}
+
+	# internal CA root certificate for clients (curl --cacert, Codex): only root.crt itself;
+	# YORATH_CA_FILE is set by render-env.py; in other TLS modes it is a nonexistent file, so 404
+	handle /yorath-root-ca.crt {
+		root * /data/caddy/pki/authorities/local
+		rewrite * /{$YORATH_CA_FILE:none}
+		header Content-Disposition "attachment; filename=yorath-root-ca.crt"
+		header Content-Type application/x-x509-ca-cert
+		file_server
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

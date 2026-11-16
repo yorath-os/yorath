@@ -1,0 +1,9 @@
+# Cluster main node (change cluster-nodes): the core is reachable for nodes in the WireGuard tunnel (10.88.0.1:8000):
+# the node service and node agents. `yorath node token` adds this file once yorath-wg is up.
+services:
+  core:
+    ports:  # in addition to 127.0.0.1:8000 from compose.yaml
+      - "10.88.0.1:8000:8000"
+    volumes:
+      # WireGuard peers: written by the core when a node is approved or revoked, applied by yorath node sync
+      - ./.cluster:/cluster

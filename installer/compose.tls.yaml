@@ -1,0 +1,8 @@
+# Overlay for TLS modes (domain, own files, internal CA): port 443 and certificate files.
+# install.sh adds it unless .env.local has YORATH_TLS=off.
+services:
+  web:
+    ports:
+      - "${YORATH_WEB_BIND:-0.0.0.0}:${YORATH_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./tls:/certs:ro

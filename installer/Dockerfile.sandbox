@@ -1,0 +1,8 @@
+# syntax=docker/dockerfile:1.7
+ARG NODE_IMAGE=node:24-slim
+FROM ${NODE_IMAGE}
+ARG CODEX_VERSION
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates bubblewrap \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @openai/codex@${CODEX_VERSION}
+USER node

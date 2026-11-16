@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+web/dist/
+.vite/
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Docker and runtime data
+/data/
+volumes/
+*.db
+*.sqlite
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+installer/.env
+installer/.env.local
+
+# custom agents for local runs
+agents/custom/
+installer/.sandbox/
+installer/tls/
+installer/yorath-root-ca.crt
+
+# yorath scan report (agents outside Yorath)
+installer/.host-report/
+installer/compose.models.yaml

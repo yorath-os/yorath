@@ -1,0 +1,245 @@
+/*
+ * Yorath · A3 "OS style" design — tokens. Brand green #16875E (decision 40, change brand-green).
+ *
+ * All colors, fonts, sizes, spacing, radii and shadows live only here.
+ * components.css and components use only var(--…).
+ *
+ * There is one theme, dark (14.11.2026: light windows were too bright at night). Tokens are still
+ * split into --chrome-* (system shell: top bar, left menu, desk) and --win-* (windows on top of it),
+ * so a light theme can later redefine --win-* only. No theme switch yet.
+ */
+
+@import "./fonts.css";
+
+:root {
+  color-scheme: dark; /* native controls, scrollbars and autofill follow the dark theme */
+  /* ── Fonts ──────────────────────────────────────────────── */
+  --font-sans: "Golos Text Variable", "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --font-size-2xs: 11px;  /* menu section labels, column headers, badges */
+  --font-size-xs: 12px;   /* secondary text, monospace values */
+  --font-size-sm: 13px;   /* body text in windows and tables */
+  --font-size-md: 14px;   /* menu items, buttons, paragraphs */
+  --font-size-lg: 16px;   /* app window title */
+  --font-size-xl: 18px;   /* panel title, close cross */
+  --font-size-2xl: 20px;  /* desk title */
+  --font-size-3xl: 22px;  /* wizard step title */
+  --font-size-stat: 34px; /* large number in a widget */
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.1;
+  --line-height-snug: 1.35;
+  --line-height-normal: 1.45;
+  --line-height-relaxed: 1.6;
+
+  --letter-spacing-caps: 0.08em;  /* SECTION LABELS */
+  --letter-spacing-caps-sm: 0.05em;
+  --letter-spacing-tight: -0.01em;
+  --letter-spacing-stat: -0.02em;
+
+  /* ── Spacing (scale) ─────────────────────────────────────── */
+  --space-0: 0;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --space-8: 16px;
+  --space-9: 18px;
+  --space-10: 20px;
+  --space-12: 24px;
+  --space-14: 28px;
+  --space-16: 32px;
+
+  /* ── Radii ──────────────────────────────────────────────── */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-pill: 999px;
+  --radius-round: 50%;
+
+  /* ── Sizes ──────────────────────────────────────────────── */
+  --size-menubar: 40px;
+  --size-sidebar: 236px;
+  --size-rail: 64px;              /* left menu at 768–1279 width */
+  --size-nav-item: 40px;
+  --size-nav-subitem: 34px;
+  --size-icon: 18px;
+  --size-icon-sm: 14px;
+  --size-control: 44px;           /* minimum tap target */
+  --size-control-sm: 36px;        /* secondary buttons inside windows */
+  --size-control-xs: 32px;        /* filter chips, widget menu */
+  --size-titlebar: 36px;          /* widget header */
+  --size-titlebar-lg: 44px;       /* dialog window header */
+  --size-row: 44px;               /* table row */
+  --size-row-lg: 52px;            /* task list row */
+  --size-dot: 8px;
+  --size-dot-sm: 7px;
+  --size-step-marker: 24px;
+  --size-avatar: 40px;
+  --size-badge: 18px;
+  --size-track: 6px;              /* progress bar */
+  --size-track-lg: 10px;          /* per-agent error bar */
+  --size-desk-dot: 1.2px;
+  --size-desk-grid: 24px;
+  --size-border: 1px;
+  --size-border-strong: 2px;
+  --size-focus-ring: 2px;
+
+  --width-search: 520px;
+  --width-drawer: 380px;
+  --width-detail: 460px;
+  --width-wizard: 1060px;
+  --width-steps: 220px;
+  --width-kv-label: 120px;
+  --width-chat: 880px;
+  --width-message: 88%;
+  --width-bar-label: 7.5rem;      /* agent name in the errors widget */
+  --width-table-min: 36rem;       /* below this the table scrolls in its own frame */
+  --width-measure: 60ch;          /* line length of explanatory text */
+
+  /* Base widths of flexible blocks: below this width the block wraps to a new line. */
+  --basis-xs: 160px;
+  --basis-sm: 220px;
+  --basis-md: 260px;
+  --basis-lg: 300px;
+  --basis-card: 320px;
+  --basis-xl: 380px;
+  --basis-2xl: 480px;
+  --basis-3xl: 520px;
+
+  /* ── Colors: system shell (dark layer) ─────────────────── */
+  --chrome-menubar-bg: #10151D;
+  --chrome-sidebar-bg: #121924;
+  --chrome-desk-bg: #1B2431;
+  --chrome-desk-dot: #2C384A;
+  --chrome-desk-dot-edit: #33415A;
+  --chrome-border: #2A3547;
+  --chrome-border-strong: #3A475B;
+  --chrome-input-bg: #1A2230;
+  --chrome-input-border: #2F3B4E;
+  --chrome-hover: #1C2533;
+  --chrome-active: #173528;     /* selected menu item: a dark step of the brand green */
+  --chrome-button-bg: #222C3B;
+  --chrome-text: #E6EBF2;
+  --chrome-text-strong: #FFFFFF;
+  --chrome-text-muted: #C3CCD9;
+  --chrome-text-sub: #A9B4C4;
+  --chrome-text-dim: #8F9BAD;     /* placeholders, counters */
+  --chrome-text-caps: #8592A6;    /* group labels */
+  --chrome-text-desk: #B8C2D1;    /* secondary text on the desk */
+  --chrome-accent: #16875E;     /* brand green: white text on it is 4.5:1 */
+  --chrome-ok: #5BD0E5;         /* "running" is teal, not the brand green, and always has a label */
+  --chrome-alert: #E5604F;
+
+  /* ── Colors: windows (light layer) ─────────────────────── */
+  --win-bg: #141B26;
+  --win-surface: #1B2330;
+  --win-outline: #0A0E14;
+  --win-border: #2C3747;
+  --win-border-strong: #3A475B;
+  --win-border-dashed: #4A586E;
+  --win-divider: #283242;
+  --win-divider-subtle: #232C3A;
+  --win-fill: #222B38;
+  --win-fill-strong: #283242;
+  --win-track: #2C3747;
+  --win-text: #E6EBF2;
+  --win-text-secondary: #C3CCD9;
+  --win-text-muted: #A3AEBF;
+
+  /* ── Colors: accent ─────────────────────────────────────── */
+  --accent: #16875E;            /* brand green: main button, selected row */
+  --accent-text: #2FBF87;       /* light step for links and small text on dark: 6.7:1 on --win-surface */
+  --accent-soft: #11261E;
+  --accent-ring: #1E4D3A;
+  --accent-fill: #143326;
+  --accent-border: #2A6E52;
+  --accent-edit: #5FD3A3;
+  --on-accent: #FFFFFF;
+
+  /* ── Colors: states ─────────────────────────────────────── */
+  --ok: #36B5C9;                /* teal: 30° from the accent hue, so "running" is not "selected" */
+  --ok-dot: #36B5C9;
+  --ok-text: #6DD3E3;
+  --ok-text-strong: #B5ECF5;
+  --ok-bg: #0F2A33;
+
+  --warn: #E0A030;
+  --warn-dot: #E0A030;
+  --warn-text: #F0B45A;
+  --warn-text-strong: #F6CF8E;
+  --warn-bg: #3A2A10;
+  --warn-strong: #F0B45A;
+
+  --error: #E5604F;
+  --error-text: #FF8A7A;
+  --error-bg: #3A1A17;
+  --error-border: #6B2E27;
+
+  --neutral-dot: #8A93A1;
+
+  /* ── Colors: data classes ───────────────────────────────── */
+  --class-public-bg: var(--win-fill);
+  --class-public-text: var(--win-text-secondary);
+  --class-internal-bg: var(--accent-fill);
+  --class-internal-text: var(--accent-text);
+  --class-confidential-bg: var(--warn-bg);
+  --class-confidential-text: var(--warn-text-strong);
+  --class-restricted-bg: var(--error-bg);
+  --class-restricted-text: var(--error-text);
+
+  /* ── Colors: agent avatars (letter on a colored square) ─── */
+  --avatar-1: #2B5FD9;
+  --avatar-2: #B25E00;
+  --avatar-3: #7A4FC9;          /* was teal-green, too close to the accent */
+  --avatar-4: #46525D;
+  --on-avatar: #FFFFFF;
+
+  /* ── Colors: code ───────────────────────────────────────── */
+  --code-bg: #0E131A;
+  --code-text: #E3E8EF;
+  --code-key: #8FB4FF;
+
+  /* ── Shadows ────────────────────────────────────────────── */
+  --shadow-widget: 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow-window: 0 24px 60px rgba(0, 0, 0, 0.45);
+  --shadow-app: 0 12px 32px rgba(0, 0, 0, 0.35);
+  --shadow-drag: 0 18px 40px rgba(0, 0, 0, 0.5);
+  --shadow-selected-row: inset 3px 0 0 var(--accent);
+  --shadow-ring: 0 0 0 4px var(--accent-ring);
+
+  /* ── Focus ──────────────────────────────────────────────── */
+  --focus-ring-color: var(--accent-edit);
+  --focus-ring: var(--size-focus-ring) solid var(--focus-ring-color);
+  --focus-offset: 2px;
+
+  /* ── Opacity and icon stroke ────────────────────────────── */
+  --opacity-disabled: 0.55;
+  --opacity-pulse: 0.5;
+  --icon-stroke: 1.7;
+
+  /* ── Motion ─────────────────────────────────────────────── */
+  --duration-fast: 120ms;
+  --duration-pulse: 1.4s;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ── Layers ─────────────────────────────────────────────── */
+  --z-menubar: 10;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-pulse: 0ms;
+  }
+}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Yorath: node egress through Yorath (nftables rules inet yorath, proxy watch; decision 36)
+After=docker.service network-online.target
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/local/bin/yorath egress load
+ExecStart=/usr/local/bin/yorath egress watch
+# stopping the service does not remove the rules: proxy failure means closed; remove only with yorath egress off
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

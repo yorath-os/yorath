@@ -1,0 +1,9 @@
+# Domains the Developer Agent sandbox may reach through the egress proxy (squid dstdomain).
+# A leading dot means the domain with all subdomains. After editing: docker compose restart egress-proxy.
+# Git provider
+.github.com
+.githubusercontent.com
+# Package registries: without them the agent cannot run the project tests (npm install, pip install)
+registry.npmjs.org
+pypi.org
+files.pythonhosted.org

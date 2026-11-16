@@ -1,0 +1,47 @@
+# Facts shared by README.md and the site (decision 46, change public-readme).
+# The site reads this file at build time; `make check-readme` fails when README differs from it.
+# Wording: user's slogan (decision 41) and the "what is" draft from the README requirements, 14.11.2026.
+
+name: Yorath
+full_name: Yorath Operating System
+slogan: AI Infrastructure. Finally, an OS.
+eyebrow: The AI operating system
+
+# Hero subheadline of the site (positioning, recommended version). "Start in minutes." stands on the
+# install-time measurement of 15.11.2026 on clean servers; the footnote names the configuration and goes with it on the home page and on Requirements.
+subheadline: Run AI locally, connect machines and agents, and manage models, compute, and data access from one place. Start in minutes. Scale without complexity.
+start_in_minutes: >-
+  Measured on 15.11.2026 on clean Ubuntu 24.04 servers, from the install command to the first agent
+  answer, model download included and the time you spend in the setup wizard not: about 5 minutes with
+  an NVIDIA A10 (18 vCPU / 31 GB: install 3.5 min, first answer 1.5 min later) and about 7.5 minutes on
+  the minimum 4 vCPU / 8 GB without a GPU (install about 4 min, first answer 3.5 min later).
+
+# Only what works in the released version.
+what_is: >-
+  Yorath is an open-source operating environment for AI agents on your own server.
+  One command installs a local model, a registry of agents, data-access policies enforced
+  outside the model, and one journal of every call. Bring OpenClaw, Hermes, Codex or your own agents.
+
+install_command: curl -fsSL https://get.yorath.io | sh
+agent_phrase: Install Yorath on my server following https://yorath.io/install.md
+script_url: https://github.com/yorath-os/yorath/blob/main/installer/install.sh
+
+requirements:
+  short: Ubuntu 24.04 · x86_64 · 4 vCPU / 8 GB RAM
+  line: Ubuntu 24.04 x86_64, from 4 vCPU / 8 GB RAM; a GPU is needed for Codex and the connected agents.
+
+works_with:
+  agents:
+    - { name: OpenClaw, anchor: openclaw }
+    - { name: Hermes, anchor: hermes }
+    - { name: Codex, anchor: codex }
+  models:
+    - Ollama
+    - Claude, GPT and Gemini via OpenRouter
+  readme_line: OpenClaw · Hermes · Codex · Ollama · OpenRouter
+
+# The one rule that maps documentation files to site addresses (the site build and check-readme use it):
+# docs/<section>/<page>.md  <->  <base_url><section>/<page>/
+docs:
+  base_url: https://yorath.io/docs/
+  sections: [get-started, models, agents, data-access, cluster, operate, reference, troubleshooting]

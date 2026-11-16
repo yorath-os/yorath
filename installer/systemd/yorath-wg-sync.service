@@ -1,0 +1,11 @@
+[Unit]
+Description=Yorath: apply cluster tunnel peers (wg syncconf)
+After=wg-quick@yorath-wg.service
+Requires=wg-quick@yorath-wg.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/yorath node sync
+
+[Install]
+WantedBy=multi-user.target

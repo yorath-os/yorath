@@ -1,0 +1,16 @@
+employee_id,full_name,department,manager_id,vacation_days_total,vacation_days_used,vacation_days_left,last_vacation_start,last_vacation_end
+E001,Peter Miller,Engineering,E010,28,16,12,2026-07-06,2026-07-21
+E002,Anna Parker,Engineering,E010,28,7,21,2026-05-12,2026-05-18
+E003,Alex Stone,Engineering,E010,28,28,0,2026-08-03,2026-08-30
+E004,Maria Cooper,Field Sales,E011,31,10,21,2026-06-01,2026-06-10
+E005,Daniel Smith,Field Sales,E011,31,24,7,2026-09-07,2026-09-30
+E006,Ellen Wolfe,Finance,E012,28,14,14,2026-04-13,2026-04-26
+E007,Ian Moore,Finance,E012,28,0,28,,
+E008,Olivia Newman,HR,E013,28,12,16,2026-03-02,2026-03-13
+E009,Sam Fisher,Engineering,E010,28,5,23,2026-10-12,2026-10-16
+E010,Max Lewis,Engineering,E014,28,21,7,2026-08-10,2026-08-30
+E011,Natalie Cole,Field Sales,E014,31,18,13,2026-07-20,2026-08-06
+E012,Victor Grant,Finance,E014,28,9,19,2026-02-16,2026-02-24
+E013,Tara Owens,HR,E014,28,20,8,2026-06-15,2026-07-04
+E014,Andrew Scott,Management,,28,11,17,2026-01-05,2026-01-15
+E015,Ryan Miller,Field Sales,E011,31,22,9,2026-08-11,2026-08-31

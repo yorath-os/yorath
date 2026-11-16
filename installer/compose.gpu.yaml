@@ -1,0 +1,12 @@
+# Overlay for hosts with an NVIDIA GPU: Ollama gets all GPUs through nvidia-container-toolkit.
+# install.sh adds it automatically when nvidia-smi sees a GPU:
+#   docker compose --project-directory installer -f installer/compose.yaml -f installer/compose.gpu.yaml up -d
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -1,0 +1,7 @@
+[Unit]
+Description=Yorath: agents outside Yorath on the node (yorath scan, decision 36)
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/yorath scan

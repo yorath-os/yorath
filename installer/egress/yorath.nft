@@ -1,0 +1,77 @@
+# Node egress through Yorath (change node-egress, decision 36): loaded by the yorath-egress service (yorath egress load).
+# HTTP/HTTPS from containers and the host → local Squid (ports 3129/3130); everything else from containers to the outside
+# is blocked; from the host it is allowed and logged in the core journal (yorath-host-out). Squid is uid 13 (proxy).
+table inet yorath
+delete table inet yorath
+table inet yorath {
+  set private4 { type ipv4_addr; flags interval; elements = { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16 } }
+  set private6 { type ipv6_addr; flags interval; elements = { ::1/128, fc00::/7, fe80::/10 } }
+  # connected agents in the yorath_agents network: fixed addresses 172.31.0.<address>, address >= 10
+  # (distribution.yaml connected_agents); the core or the node gateway there gets a low dynamic one
+  # and must keep reaching the tunnel. An agent's only neighbour is core:8000 in that network.
+  set agents4 { type ipv4_addr; flags interval; elements = { 172.31.0.10-172.31.0.254 } }
+
+  chain pre {
+    type nat hook prerouting priority dstnat - 10; policy accept;
+    iifname != { "docker0", "br-*" } return
+    ip daddr @private4 return
+    ip6 daddr @private6 return
+    tcp dport 80 redirect to :3129
+    tcp dport 443 redirect to :3130
+  }
+
+  chain out {
+    type nat hook output priority -110; policy accept;
+    meta skuid 13 return
+    ip daddr @private4 return
+    ip6 daddr @private6 return
+    tcp dport 80 redirect to :3129
+    tcp dport 443 redirect to :3130
+  }
+
+  chain egress {
+    type filter hook forward priority filter - 10; policy accept;
+    iifname != { "docker0", "br-*" } return
+    ct state established,related accept
+    oifname { "docker0", "br-*" } accept
+    # no container reads the VPS metadata service (cloud-init user data, keys): pre-public-hardening S1
+    ip daddr 169.254.0.0/16 limit rate 10/second log prefix "yorath-egress-meta "
+    ip daddr 169.254.0.0/16 drop
+    # a connected agent reaches nothing private beyond its own network (core:8000 is there): S1
+    ip saddr @agents4 ip daddr @private4 limit rate 10/second log prefix "yorath-agent-private "
+    ip saddr @agents4 ip daddr @private4 drop
+    ip daddr @private4 accept
+    ip6 daddr @private6 accept
+    # an agent resolves names through Docker's resolver, which asks from the host side; its own DNS
+    # or NTP to any server would be a channel around the proxy (S1)
+    ip saddr @agents4 udp dport { 53, 123 } limit rate 10/second log prefix "yorath-agent-dns "
+    ip saddr @agents4 udp dport { 53, 123 } drop
+    udp dport { 53, 123 } accept
+    limit rate 10/second log prefix "yorath-egress-drop "
+    drop
+  }
+
+  chain host {
+    type filter hook output priority filter - 10; policy accept;
+    meta skuid 13 return
+    oifname "lo" return
+    ip daddr @private4 return
+    ip6 daddr @private6 return
+    ct state new tcp dport != { 80, 443 } limit rate 10/second log prefix "yorath-host-out " flags skuid
+    ct state new meta l4proto udp udp dport != { 53, 123 } limit rate 10/second log prefix "yorath-host-out " flags skuid
+  }
+
+  # proxy ports are for the node itself (after interception its connections arrive via lo, but with
+  # the public source address) and for containers; closed from the outside
+  chain guard {
+    type filter hook input priority filter - 10; policy accept;
+    iifname "lo" return
+    # a connected agent talks to the node itself only through the proxy (the interception above):
+    # not to the core port on the tunnel address, not to other host services (S1)
+    ip saddr @agents4 tcp dport { 3129, 3130 } return
+    ip saddr @agents4 limit rate 10/second log prefix "yorath-agent-private "
+    ip saddr @agents4 drop
+    iifname { "docker0", "br-*" } return
+    tcp dport { 3128, 3129, 3130 } drop
+  }
+}
